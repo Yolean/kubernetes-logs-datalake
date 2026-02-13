@@ -13,8 +13,15 @@ k3d cluster create "$CLUSTER_NAME" \
 k3d kubeconfig get "$CLUSTER_NAME" > "$KUBECONFIG"
 echo "    KUBECONFIG written to $KUBECONFIG"
 
+REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+echo "==> Building container images"
+turbo images
+
 echo "==> Importing local images into k3d"
-k3d image import -c "$CLUSTER_NAME" yolean/fluentbit:latest
+k3d image import -c "$CLUSTER_NAME" \
+  "$REPO_DIR/images/fluentbit/target/images/fluentbit.tar" \
+  "$REPO_DIR/images/versitygw/target/images/versitygw.tar"
 
 echo "==> Applying kustomize manifests"
 kubectl apply -k "$SCRIPT_DIR"

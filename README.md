@@ -1,4 +1,6 @@
-# fluentbit-kubernetes-logs-parquet
+# kubernetes-logs-datalake
+
+![Example usage](howto/example-usage-00001.png)
 
 Fluent Bit DaemonSet that collects Kubernetes container logs and writes them as Parquet files to S3-compatible storage.
 

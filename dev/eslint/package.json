@@ -1,0 +1,19 @@
+{
+  "name": "eslint-config",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "lint": "eslint ."
+  },
+  "exports": {
+    "./node": "./config-node.js",
+    "./browser": "./config-browser.js"
+  },
+  "dependencies": {
+    "@eslint/js": "9.39.2",
+    "@stylistic/eslint-plugin": "5.6.1",
+    "globals": "16.5.0",
+    "jsonc-eslint-parser": "2.4.0"
+  }
+}

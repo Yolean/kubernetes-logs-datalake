@@ -1,0 +1,1 @@
+create a sidecar to ../gateway/ that can be used to create new routes using payloads from the static frontend ../route-create/ that adhere to schemas from ../types/

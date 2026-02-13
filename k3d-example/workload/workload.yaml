@@ -12,8 +12,11 @@ spec:
       labels:
         app: log-generator
     spec:
+      securityContext:
+        runAsUser: 65534
+        runAsGroup: 65534
       containers:
-      - name: log-generator
+      - name: app
         image: busybox:1.37
         command:
         - /bin/sh

@@ -1,0 +1,1 @@
+./ui/gateway should be a kustomize base that uses ghcr.io/yolean/envoy:distroless-v1.37.0 with an envoy.yaml to set up a gateway reached through k3d's loadbalancer.

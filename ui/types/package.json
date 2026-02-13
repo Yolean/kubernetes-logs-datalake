@@ -1,0 +1,13 @@
+{
+  "name": "types",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "lint": "eslint .",
+    "schemas": "node bin/schemas.js"
+  },
+  "dependencies": {
+    "zod": "4.3.6"
+  }
+}

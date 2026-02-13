@@ -16,7 +16,7 @@ spec:
       containers:
       - name: versitygw
         image: docker.io/versity/versitygw:v1.2.0
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: Never
         args:
         - posix
         - /data

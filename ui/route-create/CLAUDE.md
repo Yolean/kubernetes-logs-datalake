@@ -1,0 +1,1 @@
+create an index.html built using Vite 8 that presents a form to create new routes and sends such payloads to ../gateway-extproc's "routes" service.

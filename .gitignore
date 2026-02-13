@@ -1,4 +1,7 @@
+.turbo
 node_modules
+target
+.DS_Store
 
 # while in heavy development, to avoid huge diffs
 package-lock.json

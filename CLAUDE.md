@@ -1,8 +1,5 @@
 
 ## rules
 
-- all kubectl access should use --kubeconfig=$(pwd)/example/kubeconfig
-
-## todo
-
-- Add a cluster tag to log entries, based on an env value on the daemonset. Use "dev" for the example. Use cluster as the first path level.
+- all kubectl access should use --kubeconfig=$(pwd)/k3d-example/kubeconfig
+- Use `npm install` for dependencies (not yarn). The `packageManager` field is set to yarn for turborepo workspace resolution only.

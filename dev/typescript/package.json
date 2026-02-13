@@ -1,0 +1,12 @@
+{
+  "name": "typescript",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@typescript/native-preview": "7.0.0-dev.20260213.1"
+  }
+}

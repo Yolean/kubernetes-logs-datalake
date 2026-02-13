@@ -1,0 +1,16 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "tasks": {
+    "lint": {},
+    "schemas": {
+      "outputs": [
+        "target/schemas/**"
+      ]
+    },
+    "images": {
+      "outputs": [
+        "target/images/*.tar"
+      ]
+    }
+  }
+}
