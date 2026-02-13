@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: log-generator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: log-generator
+  template:
+    metadata:
+      labels:
+        app: log-generator
+    spec:
+      containers:
+      - name: log-generator
+        image: busybox:1.37
+        command:
+        - /bin/sh
+        - -c
+        args:
+        - |
+          count=0
+          while true; do
+            count=$((count + 1))
+            echo "{\"count\":$count,\"message\":\"hello from log-generator\",\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+            sleep 1
+          done

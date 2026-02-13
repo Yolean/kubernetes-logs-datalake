@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=https://json.schemastore.org/kustomization.json
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+- serviceaccount.yaml
+- clusterrole.yaml
+- clusterrolebinding.yaml
+- daemonset.yaml
+
+secretGenerator:
+- name: fluentbit-config
+  files:
+  - fluent-bit.conf
+- name: fluentbit-s3-credentials
+  envs:
+  - s3-credentials.env

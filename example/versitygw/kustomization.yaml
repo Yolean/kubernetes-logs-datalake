@@ -1,0 +1,12 @@
+# yaml-language-server: $schema=https://json.schemastore.org/kustomization.json
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+- service.yaml
+- statefulset.yaml
+
+secretGenerator:
+- name: versitygw-s3-credentials
+  envs:
+  - s3-credentials.env

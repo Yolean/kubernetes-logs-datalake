@@ -1,0 +1,4 @@
+node_modules
+
+# while in heavy development, to avoid huge diffs
+package-lock.json

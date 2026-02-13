@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: versitygw
+spec:
+  serviceName: versitygw
+  replicas: 1
+  selector:
+    matchLabels:
+      app: versitygw
+  template:
+    metadata:
+      labels:
+        app: versitygw
+    spec:
+      containers:
+      - name: versitygw
+        image: docker.io/versity/versitygw:v1.2.0
+        imagePullPolicy: IfNotPresent
+        args:
+        - posix
+        - /data
+        - --port
+        - "7070"
+        envFrom:
+        - secretRef:
+            name: versitygw-s3-credentials
+        ports:
+        - containerPort: 7070
+        volumeMounts:
+        - name: data
+          mountPath: /data
+      volumes:
+      - name: data
+        emptyDir: {}

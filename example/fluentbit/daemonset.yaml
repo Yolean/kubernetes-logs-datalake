@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: fluent-bit
+spec:
+  selector:
+    matchLabels:
+      app: fluent-bit
+  template:
+    metadata:
+      labels:
+        app: fluent-bit
+    spec:
+      serviceAccountName: fluent-bit
+      tolerations:
+      - operator: Exists
+      containers:
+      - name: fluent-bit
+        image: yolean/fluentbit:latest
+        imagePullPolicy: Never
+        args:
+        - -c
+        - /fluent-bit/etc/config/fluent-bit.conf
+        securityContext:
+          runAsUser: 0
+        envFrom:
+        - secretRef:
+            name: fluentbit-s3-credentials
+        volumeMounts:
+        - name: varlog
+          mountPath: /var/log
+          readOnly: true
+        - name: config
+          mountPath: /fluent-bit/etc/config
+          readOnly: true
+        - name: buffer
+          mountPath: /tmp/fluent-bit
+      volumes:
+      - name: varlog
+        hostPath:
+          path: /var/log
+      - name: config
+        secret:
+          secretName: fluentbit-config
+      - name: buffer
+        emptyDir: {}
