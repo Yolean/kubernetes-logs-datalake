@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # y-logcli - Query Kubernetes container logs stored as Parquet in S3
-# S3 path layout: /<namespace>/<pod>/<container>/YYYY/MM/DD/HH/MM/<uuid>.parquet
+# S3 path layout: /<cluster>/<namespace>/<pod>/<container>/YYYY/MM/DD/HH/MM/<uuid>.parquet
 
 S3_ENDPOINT="localhost:30070"
 S3_BUCKET="fluentbit-logs"
@@ -95,7 +95,7 @@ build_s3_path() {
       container)  container="${SELECTOR_VALUES[$i]}" ;;
     esac
   done
-  echo "s3://${S3_BUCKET}/${ns}/${pod}/${container}/**/*.parquet"
+  echo "s3://${S3_BUCKET}/${CONTEXT}/${ns}/${pod}/${container}/**/*.parquet"
 }
 
 # Convert --since duration to SQL interval
@@ -126,10 +126,16 @@ if [[ ${#WHERE_PARTS[@]} -gt 0 ]]; then
   WHERE_CLAUSE="WHERE $(IFS=' AND '; echo "${WHERE_PARTS[*]}")"
 fi
 
+# S3 path: s3://bucket/<cluster>/<namespace>/<pod>/<container>/YYYY/...
+# split('/'):  [1]=bucket [2]=cluster [3]=ns [4]=pod [5]=container
+PARTITION_COLS="string_split(filename, '/')[5] AS namespace,
+  string_split(filename, '/')[6] AS pod,
+  string_split(filename, '/')[7] AS container"
+
 case "$OUTPUT" in
   raw)    SELECT_COLS="message" ; DUCKDB_MODE=(-cmd ".mode list" -cmd ".headers off") ;;
-  lines)  SELECT_COLS="*"      ; DUCKDB_MODE=(-cmd ".mode line") ;;
-  table)  SELECT_COLS="*"      ; DUCKDB_MODE=() ;;
+  lines)  SELECT_COLS="${PARTITION_COLS}, date, stream, logtag, message" ; DUCKDB_MODE=(-cmd ".mode line") ;;
+  table)  SELECT_COLS="${PARTITION_COLS}, date, stream, logtag, message" ; DUCKDB_MODE=() ;;
   *)      echo "Unknown output mode: $OUTPUT (use table, raw, or lines)" >&2; exit 1 ;;
 esac
 
@@ -144,7 +150,7 @@ SET s3_use_ssl = false;
 SET s3_url_style = 'path';
 
 SELECT ${SELECT_COLS}
-FROM read_parquet('${S3_PATH}', hive_partitioning=false)
+FROM read_parquet('${S3_PATH}', filename=true, hive_partitioning=false)
 ${WHERE_CLAUSE}
 ORDER BY date;
 EOF
@@ -153,7 +159,7 @@ EOF
 duckdb ${DUCKDB_MODE[@]+"${DUCKDB_MODE[@]}"} -c "$SQL"
 
 QUERY_SQL="SELECT ${SELECT_COLS}
-FROM read_parquet('${S3_PATH}', hive_partitioning=false)
+FROM read_parquet('${S3_PATH}', filename=true, hive_partitioning=false)
 ${WHERE_CLAUSE}
 ORDER BY date;"
 

@@ -23,6 +23,9 @@ spec:
         - /fluent-bit/etc/config/fluent-bit.conf
         securityContext:
           runAsUser: 0
+        env:
+        - name: CLUSTER_NAME
+          value: dev
         envFrom:
         - secretRef:
             name: fluentbit-s3-credentials
