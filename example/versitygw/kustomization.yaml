@@ -4,6 +4,7 @@ kind: Kustomization
 
 resources:
 - service.yaml
+- nodeport.yaml
 - statefulset.yaml
 
 secretGenerator:

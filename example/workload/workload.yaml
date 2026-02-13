@@ -23,6 +23,11 @@ spec:
           count=0
           while true; do
             count=$((count + 1))
-            echo "{\"count\":$count,\"message\":\"hello from log-generator\",\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+            if [ $((count % 10)) -eq 0 ]; then
+              printf '{"count":%d,"message":"stack trace example\\nError: something failed\\n  at main (app.js:42)\\n  at run (app.js:10)","ts":"%s"}\n' \
+                "$count" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            else
+              echo "{\"count\":$count,\"message\":\"hello from log-generator\",\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+            fi
             sleep 1
           done

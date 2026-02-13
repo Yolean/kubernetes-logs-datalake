@@ -7,7 +7,8 @@ export KUBECONFIG="$SCRIPT_DIR/kubeconfig"
 
 echo "==> Creating k3d cluster '$CLUSTER_NAME'"
 k3d cluster create "$CLUSTER_NAME" \
-  --kubeconfig-update-default=false
+  --kubeconfig-update-default=false \
+  -p "30070:30070@server:0"
 
 k3d kubeconfig get "$CLUSTER_NAME" > "$KUBECONFIG"
 echo "    KUBECONFIG written to $KUBECONFIG"
