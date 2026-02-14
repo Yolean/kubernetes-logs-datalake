@@ -1,0 +1,54 @@
+static_resources:
+  listeners:
+  - name: external
+    address:
+      socket_address:
+        address: 0.0.0.0
+        port_value: 8080
+    filter_chains:
+    - filters:
+      - name: envoy.filters.network.http_connection_manager
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+          stat_prefix: duckdb_proxy
+          route_config:
+            virtual_hosts:
+            - name: duckdb
+              domains: ["*"]
+              routes:
+              - match:
+                  prefix: "/"
+                route:
+                  cluster: duckdb_local
+                  host_rewrite_literal: "localhost:4213"
+              request_headers_to_add:
+              - header:
+                  key: "Origin"
+                  value: "http://localhost:4213"
+                append_action: OVERWRITE_IF_EXISTS_OR_ADD
+              - header:
+                  key: "Referer"
+                  value: "http://localhost:4213/"
+                append_action: OVERWRITE_IF_EXISTS_OR_ADD
+              request_headers_to_remove:
+              - "x-forwarded-for"
+              - "x-forwarded-proto"
+              - "x-forwarded-host"
+          http_filters:
+          - name: envoy.filters.http.router
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+  clusters:
+  - name: duckdb_local
+    connect_timeout: 5s
+    type: STATIC
+    dns_lookup_family: V6_ONLY
+    load_assignment:
+      cluster_name: duckdb_local
+      endpoints:
+      - lb_endpoints:
+        - endpoint:
+            address:
+              socket_address:
+                address: "::1"
+                port_value: 4213

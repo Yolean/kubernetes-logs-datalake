@@ -12,6 +12,7 @@ spec:
       labels:
         app: gateway
     spec:
+      serviceAccountName: gateway
       containers:
       - name: envoy
         image: ghcr.io/yolean/envoy:distroless-v1.37.0@sha256:92fdb97b9fdb47da82fbe3651b83bd1419e544966d264632af4864004652685f
@@ -20,10 +21,27 @@ spec:
           containerPort: 8080
         - name: admin
           containerPort: 9901
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 8080
+          initialDelaySeconds: 1
+          periodSeconds: 1
         volumeMounts:
         - name: config
           mountPath: /etc/envoy
           readOnly: true
+      - name: xds
+        image: yolean/gateway-sidecar:latest
+        imagePullPolicy: Never
+        env:
+        - name: GATEWAY_HOSTNAME
+          value: localhost
+        ports:
+        - name: xds
+          containerPort: 18000
+        - name: api
+          containerPort: 18080
       volumes:
       - name: config
         configMap:

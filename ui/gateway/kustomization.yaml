@@ -7,8 +7,14 @@ namespace: ui
 resources:
 - deployment.yaml
 - service.yaml
+- rbac.yaml
 
 configMapGenerator:
 - name: gateway-envoy
   files:
   - envoy.yaml
+- name: duckdb-envoy
+  options:
+    disableNameSuffixHash: true
+  files:
+  - envoy.yaml=duckdb-envoy.yaml
