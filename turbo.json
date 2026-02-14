@@ -7,9 +7,22 @@
         "target/schemas/**"
       ]
     },
+    "compile": {
+      "outputs": [
+        "target/bin/**"
+      ]
+    },
     "images": {
+      "dependsOn": [
+        "compile"
+      ],
       "outputs": [
         "target/images/*.tar"
+      ]
+    },
+    "test": {},
+    "acceptancetest": {
+      "dependsOn": [
       ]
     }
   }

@@ -5,6 +5,7 @@
   "workspaces": [
     "dev/*",
     "images/*",
+    "test/*",
     "ui/*"
   ],
   "scripts": {

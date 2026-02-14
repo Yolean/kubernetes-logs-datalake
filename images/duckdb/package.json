@@ -1,0 +1,9 @@
+{
+  "name": "duckdb-image",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "images": "bin/images.sh"
+  }
+}
