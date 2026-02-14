@@ -195,6 +195,7 @@ func (sm *SnapshotManager) buildRouteConfig(views []*ViewState) *route.RouteConf
 						HostRewriteSpecifier: &route.RouteAction_HostRewriteLiteral{
 							HostRewriteLiteral: "localhost",
 						},
+						Timeout: durationpb.New(0), // disable route timeout for SSE streams
 						RetryPolicy: &route.RetryPolicy{
 							RetryOn:    "connect-failure,reset",
 							NumRetries: wrapperspb.UInt32(3),
