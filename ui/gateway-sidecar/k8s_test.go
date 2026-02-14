@@ -48,9 +48,27 @@ func TestCreateViewJob(t *testing.T) {
 	g.Expect(envoy.ReadinessProbe.HTTPGet.Path).To(Equal("/"))
 	g.Expect(envoy.ReadinessProbe.HTTPGet.Port.IntValue()).To(Equal(8080))
 
-	// ConfigMap volume
-	g.Expect(job.Spec.Template.Spec.Volumes).To(HaveLen(1))
+	// DuckDB S3 secret
+	g.Expect(duckdb.EnvFrom).To(HaveLen(1))
+	g.Expect(duckdb.EnvFrom[0].SecretRef.Name).To(Equal("duckdb-s3"))
+
+	// DuckDB subset env vars
+	g.Expect(duckdb.Env).To(HaveLen(2))
+	g.Expect(duckdb.Env[0].Name).To(Equal("SUBSET_CLUSTER"))
+	g.Expect(duckdb.Env[0].Value).To(Equal("dev"))
+	g.Expect(duckdb.Env[1].Name).To(Equal("SUBSET_NAMESPACE"))
+	g.Expect(duckdb.Env[1].Value).To(Equal("logs"))
+
+	// DuckDB init volume mount
+	g.Expect(duckdb.VolumeMounts).To(HaveLen(1))
+	g.Expect(duckdb.VolumeMounts[0].Name).To(Equal("duckdb-init"))
+	g.Expect(duckdb.VolumeMounts[0].MountPath).To(Equal("/etc/duckdb"))
+	g.Expect(duckdb.VolumeMounts[0].ReadOnly).To(BeTrue())
+
+	// Volumes: envoy-config + duckdb-init
+	g.Expect(job.Spec.Template.Spec.Volumes).To(HaveLen(2))
 	g.Expect(job.Spec.Template.Spec.Volumes[0].ConfigMap.Name).To(Equal("duckdb-envoy"))
+	g.Expect(job.Spec.Template.Spec.Volumes[1].ConfigMap.Name).To(Equal("duckdb-init"))
 
 	// ActiveDeadlineSeconds
 	g.Expect(*job.Spec.ActiveDeadlineSeconds).To(Equal(int64(3600)))
@@ -121,4 +139,23 @@ func TestDeleteViewService(t *testing.T) {
 
 	_, err := clientset.CoreV1().Services(viewNamespace).Get(context.Background(), "view-test01", metav1.GetOptions{})
 	g.Expect(err).To(HaveOccurred())
+}
+
+func TestCreateViewJobClusterOnlySubset(t *testing.T) {
+	g := NewWithT(t)
+
+	clientset := fake.NewSimpleClientset()
+	k := NewK8sClient(clientset)
+
+	err := k.CreateViewJob("cluster-only", Subset{Cluster: "dev"})
+	g.Expect(err).NotTo(HaveOccurred())
+
+	job, err := clientset.BatchV1().Jobs(viewNamespace).Get(context.Background(), "view-cluster-only", metav1.GetOptions{})
+	g.Expect(err).NotTo(HaveOccurred())
+
+	duckdb := job.Spec.Template.Spec.Containers[0]
+	g.Expect(duckdb.Env[0].Name).To(Equal("SUBSET_CLUSTER"))
+	g.Expect(duckdb.Env[0].Value).To(Equal("dev"))
+	g.Expect(duckdb.Env[1].Name).To(Equal("SUBSET_NAMESPACE"))
+	g.Expect(duckdb.Env[1].Value).To(Equal(""))
 }
