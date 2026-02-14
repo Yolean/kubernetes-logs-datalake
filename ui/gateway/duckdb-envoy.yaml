@@ -21,6 +21,7 @@ static_resources:
                 route:
                   cluster: duckdb_local
                   host_rewrite_literal: "localhost:4213"
+                  timeout: 0s
               request_headers_to_add:
               - header:
                   key: "Origin"
