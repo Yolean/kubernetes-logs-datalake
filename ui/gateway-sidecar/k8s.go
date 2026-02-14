@@ -20,6 +20,9 @@ const (
 	labelViewName  = "lakeview.yolean.se/view-name"
 	annoCluster    = "lakeview.yolean.se/cluster"
 	annoNamespace  = "lakeview.yolean.se/namespace"
+	secretS3       = "duckdb-s3"
+	configInit     = "duckdb-init"
+	configEnvoy    = "duckdb-envoy"
 )
 
 type K8sClient struct {
@@ -68,6 +71,22 @@ func (k *K8sClient) CreateViewJob(name string, subset Subset) error {
 							Name:            "duckdb",
 							Image:           "yolean/duckdb-ui:latest",
 							ImagePullPolicy: corev1.PullNever,
+							EnvFrom: []corev1.EnvFromSource{{
+								SecretRef: &corev1.SecretEnvSource{
+									LocalObjectReference: corev1.LocalObjectReference{
+										Name: secretS3,
+									},
+								},
+							}},
+							Env: []corev1.EnvVar{
+								{Name: "SUBSET_CLUSTER", Value: subset.Cluster},
+								{Name: "SUBSET_NAMESPACE", Value: subset.Namespace},
+							},
+							VolumeMounts: []corev1.VolumeMount{{
+								Name:      "duckdb-init",
+								MountPath: "/etc/duckdb",
+								ReadOnly:  true,
+							}},
 						},
 						{
 							Name:  "envoy",
@@ -93,16 +112,28 @@ func (k *K8sClient) CreateViewJob(name string, subset Subset) error {
 							},
 						},
 					},
-					Volumes: []corev1.Volume{{
-						Name: "envoy-config",
-						VolumeSource: corev1.VolumeSource{
-							ConfigMap: &corev1.ConfigMapVolumeSource{
-								LocalObjectReference: corev1.LocalObjectReference{
-									Name: "duckdb-envoy",
+					Volumes: []corev1.Volume{
+						{
+							Name: "envoy-config",
+							VolumeSource: corev1.VolumeSource{
+								ConfigMap: &corev1.ConfigMapVolumeSource{
+									LocalObjectReference: corev1.LocalObjectReference{
+										Name: configEnvoy,
+									},
 								},
 							},
 						},
-					}},
+						{
+							Name: "duckdb-init",
+							VolumeSource: corev1.VolumeSource{
+								ConfigMap: &corev1.ConfigMapVolumeSource{
+									LocalObjectReference: corev1.LocalObjectReference{
+										Name: configInit,
+									},
+								},
+							},
+						},
+					},
 				},
 			},
 		},

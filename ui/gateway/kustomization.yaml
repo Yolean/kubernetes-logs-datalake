@@ -18,3 +18,8 @@ configMapGenerator:
     disableNameSuffixHash: true
   files:
   - envoy.yaml=duckdb-envoy.yaml
+- name: duckdb-init
+  options:
+    disableNameSuffixHash: true
+  files:
+  - init.sql=duckdb-init.sql

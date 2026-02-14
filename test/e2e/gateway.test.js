@@ -83,6 +83,9 @@ describe('gateway', () => {
     preExistingViewNames = svcs.map(s => s.metadata.labels[labelViewName]).filter(Boolean);
     console.log(`Pre-existing view services: ${preExistingViewNames.length > 0 ? preExistingViewNames.join(', ') : '(none)'}`);
 
+    console.log('Applying S3 credentials secret');
+    kubectl(`apply -k ${resolve(REPO_DIR, 'k3d-example/ui')}`);
+
     console.log('Applying gateway kustomize');
     kubectl(`apply -k ${resolve(REPO_DIR, 'ui/gateway')}`);
 
