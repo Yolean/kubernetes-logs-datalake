@@ -6,5 +6,8 @@
   "scripts": {
     "compile": "bin/compile.sh",
     "images": "bin/images.sh"
+  },
+  "devDependencies": {
+    "contain": "0.7.5"
   }
 }

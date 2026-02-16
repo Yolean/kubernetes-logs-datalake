@@ -61,7 +61,7 @@ let preExistingViewNames = [];
 
 describe('gateway', () => {
   beforeAll(async () => {
-    importImage(resolve(REPO_DIR, 'images/gateway-sidecar/target/images/gateway-sidecar.tar'));
+    importImage(resolve(REPO_DIR, 'ui/gateway-sidecar/target/images/gateway-sidecar.tar'));
     importImage(resolve(REPO_DIR, 'images/duckdb/target/images/duckdb-ui.tar'));
 
     console.log('Ensuring ui namespace exists');
