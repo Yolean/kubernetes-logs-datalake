@@ -134,8 +134,8 @@ PARTITION_COLS="string_split(filename, '/')[5] AS namespace,
 
 case "$OUTPUT" in
   raw)    SELECT_COLS="message" ; DUCKDB_MODE=(-cmd ".mode list" -cmd ".headers off") ;;
-  lines)  SELECT_COLS="${PARTITION_COLS}, date, stream, logtag, message" ; DUCKDB_MODE=(-cmd ".mode line") ;;
-  table)  SELECT_COLS="${PARTITION_COLS}, date, stream, logtag, message" ; DUCKDB_MODE=() ;;
+  lines)  SELECT_COLS="cluster, ${PARTITION_COLS}, date, stream, logtag, message" ; DUCKDB_MODE=(-cmd ".mode line") ;;
+  table)  SELECT_COLS="cluster, ${PARTITION_COLS}, date, stream, logtag, message" ; DUCKDB_MODE=() ;;
   *)      echo "Unknown output mode: $OUTPUT (use table, raw, or lines)" >&2; exit 1 ;;
 esac
 
