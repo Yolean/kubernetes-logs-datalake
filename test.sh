@@ -133,6 +133,47 @@ else
   ERRORS=$((ERRORS + 1))
 fi
 
+# 7d. SIGTERM flush - verify buffered data is flushed to S3 on shutdown
+echo "==> Testing SIGTERM flush..."
+MARKER="sigterm-test-$(date +%s)"
+
+# Emit a unique marker log
+$KUBECTL run "$MARKER" --rm -i --restart=Never \
+  --image=busybox:1.37 \
+  --command -- echo "$MARKER" \
+  2>/dev/null
+
+# Wait for fluent-bit tail to pick it up
+sleep 3
+
+# Kill fluent-bit before upload_timeout (15s) triggers a regular flush
+$KUBECTL delete pod -l app=fluent-bit --grace-period=5
+wait_for_rollout daemonset fluent-bit 60s
+
+# Poll for the marker in S3 (up to 30s for the new pod to be ready)
+FLUSH_TIMEOUT=30
+FLUSH_INTERVAL=5
+flush_elapsed=0
+FLUSH_FOUND=false
+
+while [ "$flush_elapsed" -lt "$FLUSH_TIMEOUT" ]; do
+  FLUSH_OUTPUT=$(./y-logcli --context=dev query '{namespace="default"}' -o raw 2>&1) || true
+  if grep -q "$MARKER" <<< "$FLUSH_OUTPUT"; then
+    FLUSH_FOUND=true
+    break
+  fi
+  flush_elapsed=$((flush_elapsed + FLUSH_INTERVAL))
+  echo "  Marker not yet in S3, retrying in ${FLUSH_INTERVAL}s... (${flush_elapsed}/${FLUSH_TIMEOUT}s)"
+  sleep "$FLUSH_INTERVAL"
+done
+
+if [ "$FLUSH_FOUND" = true ]; then
+  echo "  PASS: SIGTERM flush - marker '$MARKER' found in S3"
+else
+  echo "  FAIL: SIGTERM flush - marker '$MARKER' not found in S3 (data lost on shutdown)" >&2
+  ERRORS=$((ERRORS + 1))
+fi
+
 # --- 8. Result ---
 
 echo ""
