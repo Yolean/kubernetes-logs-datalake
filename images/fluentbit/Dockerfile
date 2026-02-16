@@ -49,7 +49,7 @@ RUN cmake \
     -DFLB_EXAMPLES=Off \
     -DFLB_HTTP_SERVER=On \
     -DFLB_IN_SYSTEMD=Off \
-    -DFLB_OUT_KAFKA=Off \
+    -DFLB_KAFKA=Off \
     -DFLB_OUT_PGSQL=Off \
     -DFLB_ARROW=On \
     -DFLB_WASM=Off \
