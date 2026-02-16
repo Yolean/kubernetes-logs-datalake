@@ -3,9 +3,13 @@ name: fluentbit
 on:
   push:
     branches: [main]
-    paths: ['images/fluentbit/**']
+    paths:
+    - .github/workflows/fluentbit.yaml
+    - images/fluentbit/Dockerfile
   pull_request:
-    paths: ['images/fluentbit/**']
+    paths:
+    - .github/workflows/fluentbit.yaml
+    - images/fluentbit/Dockerfile
 
 permissions:
   contents: read
@@ -33,9 +37,7 @@ jobs:
       with:
         images: ghcr.io/yolean/fluentbit
         tags: |
-          type=sha
-          type=ref,event=branch
-          type=ref,event=tag
+          type=raw,value=${{ github.sha }}
 
     - uses: docker/build-push-action@v6
       with:
