@@ -8,7 +8,7 @@ OUTPUT_DIR="$PACKAGE_DIR/target/images"
 
 mkdir -p "$OUTPUT_DIR"
 
-docker build -t "$IMAGE_NAME:$IMAGE_TAG" "$PACKAGE_DIR"
+docker buildx build --load -t "$IMAGE_NAME:$IMAGE_TAG" "$PACKAGE_DIR"
 docker save "$IMAGE_NAME:$IMAGE_TAG" -o "$OUTPUT_DIR/fluentbit.tar"
 
 echo "Saved $OUTPUT_DIR/fluentbit.tar"

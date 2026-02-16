@@ -14,7 +14,6 @@ RUN set -ex; \
     pkg-config \
     libssl-dev \
     libcurl4-openssl-dev \
-    libsasl2-dev \
     zlib1g-dev \
     libyaml-dev \
     flex \
@@ -52,6 +51,8 @@ RUN cmake \
     -DFLB_IN_SYSTEMD=Off \
     -DFLB_OUT_KAFKA=Off \
     -DFLB_ARROW=On \
+    -DFLB_WASM=Off \
+    -DFLB_LUAJIT=Off \
     ..
 
 RUN make -j$(nproc)
