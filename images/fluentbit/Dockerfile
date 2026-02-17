@@ -87,7 +87,7 @@ RUN set -ex; \
   done; \
   ls "$LIBDIR"
 
-FROM gcr.io/distroless/cc-debian13:nonroot@sha256:5c94e1d2e831f0fadfe4048427f6ff3a91481606da2841c5b26674220ac84d2d
+FROM gcr.io/distroless/cc-debian13:nonroot@sha256:84fcd3c223b144b0cb6edc5ecc75641819842a9679a3a58fd6294bec47532bf7
 
 COPY --from=build /fluent-bit/bin/fluent-bit /usr/local/bin/
 COPY --from=build /fluent-bit/etc/ /fluent-bit/etc/
