@@ -34,6 +34,31 @@ jobs:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
 
+    - name: Install k3d
+      run: curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
+
+    - name: Install duckdb
+      run: |
+        curl -fsSL https://github.com/duckdb/duckdb/releases/latest/download/duckdb_cli-linux-amd64.gz | gunzip > /usr/local/bin/duckdb
+        chmod +x /usr/local/bin/duckdb
+
+    - uses: imjasonh/setup-crane@v0.5
+
+    - name: Install dependencies
+      run: npm run refresh
+
+    - name: Single-arch build for testing
+      uses: docker/build-push-action@v6
+      with:
+        context: images/fluentbit
+        load: true
+        tags: fluentbit-test
+        cache-from: type=gha,scope=fluentbit
+        cache-to: type=gha,mode=max,scope=fluentbit
+
+    - run: ./test.sh
+
+    # Multi-arch production image
     - uses: docker/metadata-action@v5
       id: meta
       with:
@@ -51,6 +76,7 @@ jobs:
         cache-from: type=gha,scope=fluentbit
         cache-to: type=gha,mode=max,scope=fluentbit
 
+    # Multi-arch debug image
     - uses: docker/metadata-action@v5
       id: meta-debug
       with:

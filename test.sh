@@ -37,7 +37,7 @@ fi
 # --- 2. Build images ---
 
 echo "==> Building container images"
-turbo images --output-logs=new-only
+./node_modules/.bin/turbo images --output-logs=new-only
 
 # --- 3. Import into k3d ---
 
@@ -82,10 +82,13 @@ POLL_TIMEOUT=120
 POLL_INTERVAL=5
 elapsed=0
 
+LAST_ERROR=""
 while true; do
   OUTPUT=$(./y-logcli --context=dev query '{namespace="default"}' 2>&1) && break
+  LAST_ERROR="$OUTPUT"
   elapsed=$((elapsed + POLL_INTERVAL))
   if [ "$elapsed" -ge "$POLL_TIMEOUT" ]; then
+    echo "  Last y-logcli output: $LAST_ERROR" >&2
     fail "No parquet data appeared within ${POLL_TIMEOUT}s"
   fi
   echo "  No data yet, retrying in ${POLL_INTERVAL}s... (${elapsed}/${POLL_TIMEOUT}s)"
@@ -143,8 +146,8 @@ $KUBECTL run "$MARKER" --rm -i --restart=Never \
   --command -- echo "$MARKER" \
   2>/dev/null
 
-# Wait for fluent-bit tail to pick it up
-sleep 3
+# Wait for fluent-bit tail to pick it up (must exceed Refresh_Interval=5)
+sleep 8
 
 # Kill fluent-bit before upload_timeout (15s) triggers a regular flush
 $KUBECTL delete pod -l app=fluent-bit --grace-period=5

@@ -15,6 +15,7 @@
   "devDependencies": {
     "eslint": "^10.0.0",
     "eslint-plugin-yml": "^3.1.2",
+    "turbo": "2.8.9",
     "vitest": "4.0.18"
   }
 }
