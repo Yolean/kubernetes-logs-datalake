@@ -1,6 +1,8 @@
 FROM debian:trixie@sha256:2c91e484d93f0830a7e05a2b9d92a7b102be7cab562198b984a84fdbc7806d91 AS build
 
 ARG FLB_VERSION=v4.2.2
+ARG FLB_TRACE=Off
+ARG FLB_HTTP_CLIENT_DEBUG=Off
 
 RUN set -ex; \
   export DEBIAN_FRONTEND=noninteractive; \
@@ -39,10 +41,15 @@ RUN set -ex; \
 
 RUN git clone --depth 1 --branch $FLB_VERSION https://github.com/fluent/fluent-bit.git /src/fluent-bit
 
+COPY *.patch /src/
+RUN cd /src/fluent-bit && git apply /src/*.patch
+
 WORKDIR /src/fluent-bit/build
 
 RUN cmake \
     -DFLB_RELEASE=On \
+    -DFLB_TRACE=${FLB_TRACE} \
+    -DFLB_HTTP_CLIENT_DEBUG=${FLB_HTTP_CLIENT_DEBUG} \
     -DFLB_JEMALLOC=On \
     -DFLB_TLS=On \
     -DFLB_SHARED_LIB=Off \
