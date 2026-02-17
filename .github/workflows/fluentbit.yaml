@@ -48,8 +48,8 @@ jobs:
         push: ${{ github.event_name == 'push' }}
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
+        cache-from: type=gha,scope=fluentbit
+        cache-to: type=gha,mode=max,scope=fluentbit
 
     - uses: docker/metadata-action@v5
       id: meta-debug
@@ -68,5 +68,5 @@ jobs:
         build-args: |
           FLB_TRACE=On
           FLB_HTTP_CLIENT_DEBUG=On
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
+        cache-from: type=gha,scope=fluentbit-debug
+        cache-to: type=gha,mode=max,scope=fluentbit-debug
