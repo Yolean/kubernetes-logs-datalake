@@ -113,12 +113,15 @@ since_to_interval() {
 
 S3_PATH="$(build_s3_path)"
 
+# epoch_ms() returns TIMESTAMP (no tz); AT TIME ZONE 'UTC' marks it as UTC for correct comparison with now().
+TIME_EXPR="epoch_ms(time) AT TIME ZONE 'UTC'"
+
 # Build WHERE clause
 WHERE_PARTS=()
 
 if [[ -n "$SINCE" ]]; then
   INTERVAL="$(since_to_interval "$SINCE")"
-  WHERE_PARTS+=("date::TIMESTAMPTZ >= now() - INTERVAL '${INTERVAL}'")
+  WHERE_PARTS+=("${TIME_EXPR} >= now() - INTERVAL '${INTERVAL}'")
 fi
 
 WHERE_CLAUSE=""
@@ -134,8 +137,8 @@ PARTITION_COLS="string_split(filename, '/')[5] AS namespace,
 
 case "$OUTPUT" in
   raw)    SELECT_COLS="message" ; DUCKDB_MODE=(-cmd ".mode list" -cmd ".headers off") ;;
-  lines)  SELECT_COLS="cluster, ${PARTITION_COLS}, date, stream, logtag, message" ; DUCKDB_MODE=(-cmd ".mode line") ;;
-  table)  SELECT_COLS="cluster, ${PARTITION_COLS}, date, stream, logtag, message" ; DUCKDB_MODE=() ;;
+  lines)  SELECT_COLS="cluster, ${PARTITION_COLS}, ${TIME_EXPR} AS time, stream, logtag, message" ; DUCKDB_MODE=(-cmd ".mode line") ;;
+  table)  SELECT_COLS="cluster, ${PARTITION_COLS}, ${TIME_EXPR} AS time, stream, logtag, message" ; DUCKDB_MODE=() ;;
   *)      echo "Unknown output mode: $OUTPUT (use table, raw, or lines)" >&2; exit 1 ;;
 esac
 
@@ -152,7 +155,7 @@ SET s3_url_style = 'path';
 SELECT ${SELECT_COLS}
 FROM read_parquet('${S3_PATH}', filename=true, hive_partitioning=false)
 ${WHERE_CLAUSE}
-ORDER BY date;
+ORDER BY ${TIME_EXPR};
 EOF
 )
 
@@ -161,7 +164,7 @@ duckdb ${DUCKDB_MODE[@]+"${DUCKDB_MODE[@]}"} -c "$SQL"
 QUERY_SQL="SELECT ${SELECT_COLS}
 FROM read_parquet('${S3_PATH}', filename=true, hive_partitioning=false)
 ${WHERE_CLAUSE}
-ORDER BY date;"
+ORDER BY ${TIME_EXPR};"
 
 echo ""
 echo "-- query executed:"

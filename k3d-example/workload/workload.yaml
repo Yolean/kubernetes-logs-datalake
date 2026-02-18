@@ -24,6 +24,12 @@ spec:
         args:
         - |
           count=0
+          # Burst: emit 200 lines as fast as possible to test timestamp ordering
+          while [ "$count" -lt 200 ]; do
+            count=$((count + 1))
+            echo "{\"count\":$count,\"message\":\"burst\",\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+          done
+          # Then normal logging
           while true; do
             count=$((count + 1))
             if [ $((count % 10)) -eq 0 ]; then
