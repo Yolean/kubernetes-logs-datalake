@@ -49,6 +49,7 @@ k3d image import -c "$CLUSTER_NAME" \
 # --- 4. Apply manifests ---
 
 echo "==> Applying kustomize manifests"
+$KUBECTL create namespace ui --dry-run=client -o yaml | $KUBECTL apply -f -
 $KUBECTL apply -k "$K3D_DIR"
 
 # --- 5. Wait for workloads ---

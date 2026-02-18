@@ -15,10 +15,10 @@ Usage:
   y-logcli --context=<name> query '{<selectors>}' [--since=<duration>]
 
 Examples:
-  y-logcli --context=default query '{pod="app-abc12345-abcdef"}'
-  y-logcli --context=default query '{namespace="qa"}' --since=5m
-  y-logcli --context=default query '{container="build"}' --since=1h
-  y-logcli --context=default query '{namespace="default"}' -o raw
+  y-logcli --context=dev query '{pod="app-abc12345-abcdef"}'
+  y-logcli --context=dev query '{namespace="qa"}' --since=5m
+  y-logcli --context=dev query '{container="app"}' --since=1h
+  y-logcli --context=dev query '{namespace="default"}' -o raw
 
 Selectors: namespace, pod, container (comma-separated inside braces)
 Duration: s (seconds), m (minutes), h (hours)

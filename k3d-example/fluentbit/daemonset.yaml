@@ -36,8 +36,8 @@ spec:
         - name: config
           mountPath: /fluent-bit/etc/config
           readOnly: true
-        - name: buffer
-          mountPath: /tmp/fluent-bit
+        - name: state
+          mountPath: /var/lib/fluent-bit
       volumes:
       - name: varlog
         hostPath:
@@ -45,5 +45,6 @@ spec:
       - name: config
         secret:
           secretName: fluentbit-config
-      - name: buffer
-        emptyDir: {}
+      - name: state
+        hostPath:
+          path: /var/lib/fluent-bit
