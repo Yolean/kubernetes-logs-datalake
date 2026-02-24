@@ -288,10 +288,10 @@ else
   ERRORS=$((ERRORS + 1))
 fi
 
-if grep -q "dictionary<" <<< "$PYARROW_OUTPUT"; then
-  echo "  PASS: pyarrow confirms dictionary-encoded fields present"
+if grep -q "dictionary<values=string, indices=int8" <<< "$PYARROW_OUTPUT"; then
+  echo "  PASS: pyarrow confirms dictionary<values=string, indices=int8> fields"
 else
-  echo "  FAIL: pyarrow did not find dictionary type in Arrow IPC" >&2
+  echo "  FAIL: pyarrow did not find dictionary<values=string, indices=int8> in Arrow IPC" >&2
   ERRORS=$((ERRORS + 1))
 fi
 

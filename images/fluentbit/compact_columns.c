@@ -193,7 +193,56 @@ static GArrowTable *compact_time_column(GArrowTable *table, gboolean is_utc)
 }
 
 /*
- * Dictionary-encode a string column by name.
+ * Re-index a dictionary-encoded array from int32 to int8 indices.
+ * stream/logtag have very low cardinality (2-3 values), so int8 is sufficient
+ * and saves 3 bytes per row vs the default int32.
+ * Returns a new array, or NULL on error.
+ */
+static GArrowArray *dict_reindex_int8(GArrowDictionaryArray *dict_arr)
+{
+    GError *error = NULL;
+    GArrowArray *indices = garrow_dictionary_array_get_indices(dict_arr);
+    GArrowArray *dictionary = garrow_dictionary_array_get_dictionary(dict_arr);
+
+    GArrowInt8DataType *int8_type = garrow_int8_data_type_new();
+    GArrowArray *int8_indices = garrow_array_cast(
+        indices, GARROW_DATA_TYPE(int8_type), NULL, &error);
+    if (!int8_indices) {
+        g_warning("[compact_columns] failed to cast indices to int8: %s",
+                 error->message);
+        g_error_free(error);
+        g_object_unref(int8_type);
+        g_object_unref(indices);
+        g_object_unref(dictionary);
+        return NULL;
+    }
+
+    GArrowStringDataType *str_type = garrow_string_data_type_new();
+    GArrowDictionaryDataType *new_dict_type = garrow_dictionary_data_type_new(
+        GARROW_DATA_TYPE(int8_type), GARROW_DATA_TYPE(str_type), FALSE);
+
+    GArrowDictionaryArray *new_arr = garrow_dictionary_array_new(
+        GARROW_DATA_TYPE(new_dict_type), int8_indices, dictionary, &error);
+
+    g_object_unref(new_dict_type);
+    g_object_unref(str_type);
+    g_object_unref(int8_type);
+    g_object_unref(int8_indices);
+    g_object_unref(indices);
+    g_object_unref(dictionary);
+
+    if (!new_arr) {
+        g_warning("[compact_columns] failed to create int8 dictionary array: %s",
+                 error->message);
+        g_error_free(error);
+        return NULL;
+    }
+
+    return GARROW_ARRAY(new_arr);
+}
+
+/*
+ * Dictionary-encode a string column by name, using int8 indices.
  * Returns a new table with the column replaced, or NULL on error.
  */
 static GArrowTable *dict_encode_column(GArrowTable *table, const char *col_name)
@@ -218,7 +267,7 @@ static GArrowTable *dict_encode_column(GArrowTable *table, const char *col_name)
         return NULL;
     }
 
-    /* Dictionary-encode each chunk */
+    /* Dictionary-encode each chunk, then re-index to int8 */
     guint n_chunks = garrow_chunked_array_get_n_chunks(chunked);
     GList *new_chunks = NULL;
     gboolean ok = TRUE;
@@ -236,7 +285,16 @@ static GArrowTable *dict_encode_column(GArrowTable *table, const char *col_name)
             ok = FALSE;
             break;
         }
-        new_chunks = g_list_append(new_chunks, dict_arr);
+
+        GArrowArray *int8_arr = dict_reindex_int8(dict_arr);
+        g_object_unref(dict_arr);
+        if (!int8_arr) {
+            g_object_unref(chunk);
+            ok = FALSE;
+            break;
+        }
+
+        new_chunks = g_list_append(new_chunks, int8_arr);
         g_object_unref(chunk);
     }
 

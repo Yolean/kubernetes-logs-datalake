@@ -82,6 +82,17 @@ static GArrowDataType *get_column_type(GArrowTable *table, const char *name)
     return type;
 }
 
+static void assert_dict_int8(GArrowDataType *type, const char *col_name)
+{
+    if (!GARROW_IS_DICTIONARY_DATA_TYPE(type)) return;
+    GArrowDictionaryDataType *dict = GARROW_DICTIONARY_DATA_TYPE(type);
+    GArrowDataType *idx_type = garrow_dictionary_data_type_get_index_data_type(dict);
+    char msg[128];
+    snprintf(msg, sizeof(msg), "%s dictionary uses int8 indices", col_name);
+    ASSERT_MSG(GARROW_IS_INT8_DATA_TYPE(idx_type), msg);
+    g_object_unref(idx_type);
+}
+
 static gboolean write_and_read_parquet(GArrowTable *table, const char *path,
                                        GArrowTable **out_table)
 {
@@ -174,18 +185,20 @@ static void test_arrow_compact(void)
     }
     if (time_type) g_object_unref(time_type);
 
-    /* stream and logtag are dictionary-encoded in both paths.
+    /* stream and logtag are dictionary-encoded with int8 indices in both paths.
      * DuckDB/nanoarrow reads these as VARCHAR; pyarrow sees dictionary type. */
     GArrowDataType *stream_type = get_column_type(compacted, "stream");
     ASSERT_MSG(stream_type != NULL, "stream column exists");
     ASSERT_MSG(GARROW_IS_DICTIONARY_DATA_TYPE(stream_type),
                "stream is dictionary-encoded");
+    assert_dict_int8(stream_type, "stream");
     if (stream_type) g_object_unref(stream_type);
 
     GArrowDataType *logtag_type = get_column_type(compacted, "logtag");
     ASSERT_MSG(logtag_type != NULL, "logtag column exists");
     ASSERT_MSG(GARROW_IS_DICTIONARY_DATA_TYPE(logtag_type),
                "logtag is dictionary-encoded");
+    assert_dict_int8(logtag_type, "logtag");
     if (logtag_type) g_object_unref(logtag_type);
 
     /* Write to parquet and read back */
@@ -236,18 +249,20 @@ static void test_parquet_compact(void)
     }
     g_object_unref(time_type);
 
-    /* Check stream is dictionary-encoded */
+    /* Check stream is dictionary-encoded with int8 indices */
     GArrowDataType *stream_type = get_column_type(compacted, "stream");
     ASSERT_MSG(stream_type != NULL, "stream column exists");
     ASSERT_MSG(GARROW_IS_DICTIONARY_DATA_TYPE(stream_type),
                "stream is dictionary-encoded");
+    assert_dict_int8(stream_type, "stream");
     g_object_unref(stream_type);
 
-    /* Check logtag is dictionary-encoded */
+    /* Check logtag is dictionary-encoded with int8 indices */
     GArrowDataType *logtag_type = get_column_type(compacted, "logtag");
     ASSERT_MSG(logtag_type != NULL, "logtag column exists");
     ASSERT_MSG(GARROW_IS_DICTIONARY_DATA_TYPE(logtag_type),
                "logtag is dictionary-encoded");
+    assert_dict_int8(logtag_type, "logtag");
     g_object_unref(logtag_type);
 
     /* Write to parquet and read back */
