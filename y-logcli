@@ -28,7 +28,8 @@ Examples:
 
 Selectors: namespace, pod, container (comma-separated inside braces)
 Duration: s (seconds), m (minutes), h (hours)
-Output:  -o table (default), -o raw (like kubectl logs), -o lines (key=value per field)
+Output:  -o table (default), -o raw (like kubectl logs), -o lines (key=value per field),
+         -o columns (compact: time pod container stream message)
 Format:  -f both (default), -f arrow (Timestamp ns), -f parquet (Timestamp ns UTC)
 EOF
   exit 1
@@ -167,13 +168,19 @@ build_where() {
   fi
 }
 
+# ISO 8601 with nanosecond precision in UTC.
+# ({t}) AT TIME ZONE 'UTC' extracts UTC as plain TIMESTAMP from TIMESTAMPTZ.
+NS_TIME_FMT="strftime(({t}) AT TIME ZONE 'UTC', '%Y-%m-%dT%H:%M:%S') || '.' || lpad((epoch_ns({t}) % 1000000000)::VARCHAR, 9, '0') || 'Z'"
+
 build_select_cols() {
   local time_expr="$1"
+  local ns_time="${NS_TIME_FMT//\{t\}/$time_expr}"
   case "$OUTPUT" in
-    raw)    echo "message" ;;
-    lines)  echo "cluster, ${PARTITION_COLS}, ${time_expr} AS time, stream, logtag, message" ;;
-    table)  echo "cluster, ${PARTITION_COLS}, ${time_expr} AS time, stream, logtag, message" ;;
-    *)      echo "Unknown output mode: $OUTPUT" >&2; exit 1 ;;
+    raw)      echo "message" ;;
+    columns)  echo "${ns_time} AS time, string_split(filename, '/')[10] AS pod, string_split(filename, '/')[11] AS container, stream, left(message, 60) AS message" ;;
+    lines)    echo "cluster, ${PARTITION_COLS}, ${time_expr} AS time, stream, logtag, message" ;;
+    table)    echo "cluster, ${PARTITION_COLS}, ${time_expr} AS time, stream, logtag, message" ;;
+    *)        echo "Unknown output mode: $OUTPUT" >&2; exit 1 ;;
   esac
 }
 
@@ -216,10 +223,11 @@ ${where_clause}"
 
 # Build the combined SQL
 case "$OUTPUT" in
-  raw)    DUCKDB_MODE=(-cmd ".mode list" -cmd ".headers off") ;;
-  lines)  DUCKDB_MODE=(-cmd ".mode line") ;;
-  table)  DUCKDB_MODE=() ;;
-  *)      echo "Unknown output mode: $OUTPUT (use table, raw, or lines)" >&2; exit 1 ;;
+  raw)      DUCKDB_MODE=(-cmd ".mode list" -cmd ".headers off") ;;
+  columns)  DUCKDB_MODE=(-cmd ".mode list" -cmd ".separator ' '" -cmd ".headers off") ;;
+  lines)    DUCKDB_MODE=(-cmd ".mode line") ;;
+  table)    DUCKDB_MODE=() ;;
+  *)        echo "Unknown output mode: $OUTPUT (use table, raw, columns, or lines)" >&2; exit 1 ;;
 esac
 
 ORDER_EXPR="ORDER BY time"
@@ -259,6 +267,14 @@ esac
 SQL="${S3_SETUP}
 
 ${QUERY_SQL}"
+
+if [[ "$OUTPUT" == "table" ]]; then
+  # Print column metadata above the table (DuckDB's box mode truncates types)
+  DESCRIBE_SQL="${S3_SETUP}
+SELECT column_name || ': ' || column_type FROM (DESCRIBE ${QUERY_SQL%%ORDER BY*});"
+  duckdb -noheader -list -c "$DESCRIBE_SQL" 2>/dev/null | sed 's/^/-- /' || true
+  echo ""
+fi
 
 duckdb ${DUCKDB_MODE[@]+"${DUCKDB_MODE[@]}"} -c "$SQL"
 

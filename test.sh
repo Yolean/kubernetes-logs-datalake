@@ -263,6 +263,16 @@ PARQUET_TIME_TYPE=$(duckdb_s3 "
   ) WHERE column_name='time';
 " | tr -d '[:space:]')
 
+echo "  --- DuckDB default interpretation of persisted formats ---"
+echo "  Parquet (DESCRIBE read_parquet):"
+duckdb_s3_show "
+  DESCRIBE SELECT * FROM read_parquet('s3://fluentbit-logs/dev/default/**/*.parquet', filename=true, hive_partitioning=false);
+"
+echo "  Arrow IPC (DESCRIBE read_arrow):"
+duckdb_s3_show "
+  DESCRIBE SELECT * FROM read_arrow('s3://fluentbit-logs/dev/default/**/*.arrow', filename=true);
+" 2>&1 || echo "  (DuckDB nanoarrow failed — expected with dictionary-encoded Arrow IPC)"
+
 if [[ -n "$ARROW_TIME_TYPE" && "$ARROW_TIME_TYPE" == "TIMESTAMP_NS" ]]; then
   echo "  PASS: arrow format has time as TIMESTAMP_NS (DuckDB nanoarrow)"
 elif [[ -z "$ARROW_TIME_TYPE" ]]; then
@@ -367,6 +377,6 @@ echo ""
 if [ "$ERRORS" -gt 0 ]; then
   fail "$ERRORS assertion(s) failed"
 else
-  echo "PASS: All assertions passed - state is shippable"
+  echo "PASS: All assertions passed"
   exit 0
 fi
