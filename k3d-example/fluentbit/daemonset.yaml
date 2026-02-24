@@ -26,6 +26,10 @@ spec:
         env:
         - name: CLUSTER_NAME
           value: dev
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
         envFrom:
         - secretRef:
             name: fluentbit-s3-credentials
