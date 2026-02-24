@@ -22,13 +22,17 @@ wait_for_rollout() {
   $KUBECTL rollout status "$kind/$name" --timeout="$timeout" || fail "$kind/$name rollout timed out"
 }
 
+S3_SETUP_SQL="INSTALL httpfs; LOAD httpfs;
+SET s3_region='us-east-1'; SET s3_endpoint='localhost:30070';
+SET s3_access_key_id='demoaccess'; SET s3_secret_access_key='demosecret';
+SET s3_use_ssl=false; SET s3_url_style='path';"
+
 duckdb_s3() {
-  duckdb -noheader -csv -c "
-    INSTALL httpfs; LOAD httpfs;
-    SET s3_region='us-east-1'; SET s3_endpoint='localhost:30070';
-    SET s3_access_key_id='demoaccess'; SET s3_secret_access_key='demosecret';
-    SET s3_use_ssl=false; SET s3_url_style='path';
-    $1"
+  duckdb -noheader -csv -c "${S3_SETUP_SQL} $1"
+}
+
+duckdb_s3_show() {
+  duckdb -c "${S3_SETUP_SQL} $1"
 }
 
 # --- 1. Cluster ---
@@ -116,7 +120,28 @@ echo "  Parquet data found"
 ARROW_OUTPUT=$(poll_for_format arrow) || fail "No arrow data appeared within ${POLL_TIMEOUT}s"
 echo "  Arrow data found"
 
-echo "==> Data found in both formats, running assertions..."
+# --- 6b. Print raw file metadata for one sample of each format ---
+
+print_sample_metadata() {
+  local label="$1" glob="$2"
+  local sample
+  sample=$(duckdb_s3 "SELECT DISTINCT file_name FROM parquet_schema('${glob}') LIMIT 1;")
+  echo "  --- ${label}: $(basename "$sample") ---"
+  duckdb_s3_show "
+    SELECT name, type, logical_type
+    FROM parquet_schema('${sample}')
+    WHERE name <> 'schema';
+    SELECT path_in_schema AS col, encodings, compression,
+           total_compressed_size AS comp_bytes, total_uncompressed_size AS raw_bytes
+    FROM parquet_metadata('${sample}');
+  "
+}
+
+echo "==> File metadata (one sample per format)..."
+print_sample_metadata "arrow (.arrow)" "s3://fluentbit-logs/dev/default/**/*.arrow"
+print_sample_metadata "parquet (.parquet)" "s3://fluentbit-logs/dev/default/**/*.parquet"
+
+echo "==> Running assertions..."
 
 # --- 7. Assertions ---
 
