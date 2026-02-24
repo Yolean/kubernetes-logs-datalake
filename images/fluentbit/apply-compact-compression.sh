@@ -48,10 +48,10 @@ int out_s3_compress_arrow_compact(void *json, size_t size, void **out_buf, size_
         compacted = compact_parquet_columns(table, FALSE);\
         g_object_unref(table);\
 \
-        buffer = table_to_parquet_buffer(compacted);\
+        buffer = table_to_arrow_ipc_buffer(compacted);\
         g_object_unref(compacted);\
         if (buffer == NULL) {\
-            flb_error("[aws][compress] Failed to convert compacted table to parquet buffer (arrow-compact)");\
+            flb_error("[aws][compress] Failed to convert compacted table to arrow IPC buffer (arrow-compact)");\
             return -1;\
         }\
 \

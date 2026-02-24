@@ -23,6 +23,7 @@ wait_for_rollout() {
 }
 
 S3_SETUP_SQL="INSTALL httpfs; LOAD httpfs;
+INSTALL nanoarrow FROM community; LOAD nanoarrow;
 SET s3_region='us-east-1'; SET s3_endpoint='localhost:30070';
 SET s3_access_key_id='demoaccess'; SET s3_secret_access_key='demosecret';
 SET s3_use_ssl=false; SET s3_url_style='path';"
@@ -122,15 +123,30 @@ echo "  Arrow data found"
 
 # --- 6b. Print raw file metadata for one sample of each format ---
 
-print_sample_metadata() {
-  local label="$1" glob="$2"
+print_arrow_metadata() {
+  local glob="$1"
+  local sample
+  sample=$(duckdb_s3 "SELECT file FROM glob('${glob}') ORDER BY file DESC LIMIT 1;")
+  echo "  --- arrow IPC (.arrow): $(basename "$sample") ---"
+  echo "  Schema (DESCRIBE read_arrow):"
+  duckdb_s3_show "
+    DESCRIBE SELECT * FROM read_arrow('${sample}');
+  "
+}
+
+print_parquet_metadata() {
+  local glob="$1"
   local sample
   sample=$(duckdb_s3 "SELECT DISTINCT file_name FROM parquet_schema('${glob}') LIMIT 1;")
-  echo "  --- ${label}: $(basename "$sample") ---"
+  echo "  --- parquet (.parquet): $(basename "$sample") ---"
+  echo "  Schema (parquet logical types):"
   duckdb_s3_show "
     SELECT name, type, logical_type
     FROM parquet_schema('${sample}')
     WHERE name <> 'schema';
+  "
+  echo "  Row group metadata (encodings, sizes):"
+  duckdb_s3_show "
     SELECT path_in_schema AS col, encodings, compression,
            total_compressed_size AS comp_bytes, total_uncompressed_size AS raw_bytes
     FROM parquet_metadata('${sample}');
@@ -138,8 +154,8 @@ print_sample_metadata() {
 }
 
 echo "==> File metadata (one sample per format)..."
-print_sample_metadata "arrow (.arrow)" "s3://fluentbit-logs/dev/default/**/*.arrow"
-print_sample_metadata "parquet (.parquet)" "s3://fluentbit-logs/dev/default/**/*.parquet"
+print_arrow_metadata "s3://fluentbit-logs/dev/default/**/*.arrow"
+print_parquet_metadata "s3://fluentbit-logs/dev/default/**/*.parquet"
 
 echo "==> Running assertions..."
 
@@ -191,12 +207,13 @@ else
   ERRORS=$((ERRORS + 1))
 fi
 
-# 7d. Schema comparison — arrow has Timestamp(ns), parquet has Timestamp(ns, UTC)
-echo "==> Checking parquet schemas..."
+# 7d. Schema comparison — arrow IPC has Timestamp(ns), parquet has Timestamp(ns, UTC)
+echo "==> Checking schemas..."
 
+# Use read_arrow for .arrow files (Arrow IPC), read_parquet for .parquet
 ARROW_TIME_TYPE=$(duckdb_s3 "
   SELECT column_type FROM (
-    DESCRIBE SELECT * FROM read_parquet('s3://fluentbit-logs/dev/default/**/*.arrow', filename=true, hive_partitioning=false)
+    DESCRIBE SELECT * FROM read_arrow('s3://fluentbit-logs/dev/default/**/*.arrow', filename=true)
   ) WHERE column_name='time';
 " | tr -d '[:space:]')
 
@@ -223,7 +240,7 @@ fi
 
 # 7e. Timestamp values are valid (parseable by DuckDB as timestamps)
 ARROW_TIME_SAMPLE=$(duckdb_s3 "
-  SELECT time::VARCHAR FROM read_parquet('s3://fluentbit-logs/dev/default/**/*.arrow', filename=true, hive_partitioning=false) LIMIT 1;
+  SELECT time::VARCHAR FROM read_arrow('s3://fluentbit-logs/dev/default/**/*.arrow', filename=true) LIMIT 1;
 " | tr -d '[:space:]')
 
 if grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}' <<< "$ARROW_TIME_SAMPLE"; then

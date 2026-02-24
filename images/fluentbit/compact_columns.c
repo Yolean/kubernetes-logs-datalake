@@ -290,24 +290,29 @@ GArrowTable *compact_parquet_columns(GArrowTable *table, gboolean is_utc)
         owns_current = TRUE;
     }
 
-    /* 2. Dictionary-encode stream */
-    next = dict_encode_column(current, "stream");
-    if (next) {
-        if (owns_current) {
-            g_object_unref(current);
+    /* 2-3. Dictionary-encode stream and logtag (Parquet only).
+     * For Arrow IPC (Feather), dictionary-encoded columns cause
+     * "DictionaryEncoding not supported" in nanoarrow/DuckDB readers.
+     * Parquet ignores Arrow-level dictionary types and applies its own
+     * RLE_DICTIONARY encoding at the page level anyway. */
+    if (is_utc) {
+        next = dict_encode_column(current, "stream");
+        if (next) {
+            if (owns_current) {
+                g_object_unref(current);
+            }
+            current = next;
+            owns_current = TRUE;
         }
-        current = next;
-        owns_current = TRUE;
-    }
 
-    /* 3. Dictionary-encode logtag */
-    next = dict_encode_column(current, "logtag");
-    if (next) {
-        if (owns_current) {
-            g_object_unref(current);
+        next = dict_encode_column(current, "logtag");
+        if (next) {
+            if (owns_current) {
+                g_object_unref(current);
+            }
+            current = next;
+            owns_current = TRUE;
         }
-        current = next;
-        owns_current = TRUE;
     }
 
     /* If no transformations succeeded, ref the original so caller can unref */
@@ -316,4 +321,47 @@ GArrowTable *compact_parquet_columns(GArrowTable *table, gboolean is_utc)
     }
 
     return current;
+}
+
+GArrowResizableBuffer *table_to_arrow_ipc_buffer(GArrowTable *table)
+{
+    GArrowResizableBuffer *buffer;
+    GArrowBufferOutputStream *sink;
+    GArrowFeatherWriteProperties *props;
+    GError *error = NULL;
+    gboolean success;
+
+    buffer = garrow_resizable_buffer_new(0, &error);
+    if (!buffer) {
+        g_warning("[compact_columns] failed to create buffer: %s",
+                 error->message);
+        g_error_free(error);
+        return NULL;
+    }
+
+    sink = garrow_buffer_output_stream_new(buffer);
+    if (!sink) {
+        g_object_unref(buffer);
+        return NULL;
+    }
+
+    /* Uncompressed: nanoarrow/DuckDB cannot decode LZ4 Arrow IPC bodies */
+    props = garrow_feather_write_properties_new();
+    g_object_set(props, "compression",
+                 GARROW_COMPRESSION_TYPE_UNCOMPRESSED, NULL);
+
+    success = garrow_table_write_as_feather(
+        table, GARROW_OUTPUT_STREAM(sink), props, &error);
+    g_object_unref(props);
+    g_object_unref(sink);
+
+    if (!success) {
+        g_warning("[compact_columns] failed to write feather: %s",
+                 error->message);
+        g_error_free(error);
+        g_object_unref(buffer);
+        return NULL;
+    }
+
+    return buffer;
 }

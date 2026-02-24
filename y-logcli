@@ -138,8 +138,8 @@ PARTITION_COLS="string_split(filename, '/')[5] AS namespace,
   string_split(filename, '/')[10] AS pod,
   string_split(filename, '/')[11] AS container"
 
-S3_SETUP="INSTALL httpfs;
-LOAD httpfs;
+S3_SETUP="INSTALL httpfs; LOAD httpfs;
+INSTALL nanoarrow FROM community; LOAD nanoarrow;
 SET s3_region = 'us-east-1';
 SET s3_endpoint = '${S3_ENDPOINT}';
 SET s3_access_key_id = '${S3_ACCESS_KEY}';
@@ -201,8 +201,15 @@ build_query_for_format() {
   fi
   where_clause="$(build_where "$time_expr")"
 
+  local read_fn="read_parquet"
+  local read_opts="filename=true, hive_partitioning=false"
+  if [[ "$fmt" == "arrow" ]]; then
+    read_fn="read_arrow"
+    read_opts="filename=true"
+  fi
+
   echo "SELECT ${select_cols}
-FROM read_parquet('${s3_path}', filename=true, hive_partitioning=false)
+FROM ${read_fn}('${s3_path}', ${read_opts})
 ${where_clause}"
 }
 
