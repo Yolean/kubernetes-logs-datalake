@@ -134,6 +134,7 @@ poll_for_format() {
 PARQUET_OUTPUT=$(poll_for_format parquet) || fail "No parquet data appeared within ${POLL_TIMEOUT}s"
 echo "  Parquet data found"
 
+echo "==> Probing arrow IPC via DuckDB nanoarrow (may fail with dictionary-encoded columns)..."
 ARROW_OUTPUT=$(poll_for_format arrow 2>&1) || {
   echo "  DuckDB nanoarrow cannot read dictionary-encoded Arrow IPC (ON_DUCKDB_ARROW_FAILURE=$ON_DUCKDB_ARROW_FAILURE)"
   ARROW_OUTPUT=""
@@ -177,11 +178,19 @@ print_arrow_metadata "s3://fluentbit-logs/dev/default/**/*.arrow" || {
 }
 print_parquet_metadata "s3://fluentbit-logs/dev/default/**/*.parquet"
 
-echo "  --- pyarrow (official Apache Arrow validation) ---"
+echo "==> Validating arrow IPC via pyarrow (official Apache Arrow library)..."
+# Find the log-generator's earliest arrow file (contains the burst with close ns timestamps)
+LOG_GEN_DIR=$(duckdb_s3 "
+  SELECT regexp_replace(file, '/[^/]+$', '')
+  FROM glob('s3://fluentbit-logs/dev/default/**/app/**/*.arrow')
+  ORDER BY file LIMIT 1;
+" | sed 's|s3://fluentbit-logs/||')
+echo "  log-generator prefix: $LOG_GEN_DIR"
+
 PYARROW_OUTPUT=$($KUBECTL run arrow-inspect --rm -i --restart=Never \
   --image=yolean/arrow-tools:latest --image-pull-policy=Never \
   --command -- python /usr/local/bin/inspect_arrow.py \
-  fluentbit-logs dev/default .arrow \
+  fluentbit-logs "$LOG_GEN_DIR" .arrow \
   2>/dev/null) || true
 echo "$PYARROW_OUTPUT"
 

@@ -3,9 +3,26 @@
 
 import sys
 import io
+from datetime import datetime, timezone
 import pyarrow as pa
 import boto3
 import pyarrow.ipc as ipc
+
+
+def format_timestamp_ns(ns_value):
+    """Format nanoseconds-since-epoch as ISO 8601 with nanosecond precision."""
+    secs = ns_value // 1_000_000_000
+    nanos = ns_value % 1_000_000_000
+    dt = datetime.fromtimestamp(secs, tz=timezone.utc)
+    return dt.strftime("%Y-%m-%dT%H:%M:%S") + f".{nanos:09d}Z"
+
+
+def format_value(scalar, field):
+    """Format a scalar value for display."""
+    if pa.types.is_timestamp(field.type):
+        ns = scalar.value
+        return f"{ns} ({format_timestamp_ns(ns)})"
+    return scalar.as_py()
 
 
 def main():
@@ -35,9 +52,9 @@ def main():
         print(f"No {extension} files found in s3://{bucket}/{prefix}", file=sys.stderr)
         sys.exit(1)
 
-    # Pick the most recent file
+    # Pick the earliest file (first chronologically by path)
     files.sort()
-    key = files[-1]
+    key = files[0]
 
     obj = s3.get_object(Bucket=bucket, Key=key)
     data = obj["Body"].read()
@@ -48,7 +65,9 @@ def main():
     reader = ipc.open_file(io.BytesIO(data))
     schema = reader.schema
 
-    total_rows = sum(reader.get_batch(i).num_rows for i in range(reader.num_record_batches))
+    total_rows = sum(
+        reader.get_batch(i).num_rows for i in range(reader.num_record_batches)
+    )
     print(f"Record batches: {reader.num_record_batches}")
     print(f"Total rows: {total_rows}")
     print(f"Schema ({len(schema)} fields):")
@@ -57,16 +76,14 @@ def main():
 
     if reader.num_record_batches > 0:
         batch = reader.get_batch(0)
-        if batch.num_rows > 0:
-            print("Sample (first row):")
-            for i, field in enumerate(schema):
-                scalar = batch.column(i)[0]
-                if pa.types.is_timestamp(field.type):
-                    # .value gives raw int (nanos), avoids datetime overflow
-                    val = scalar.value
-                else:
-                    val = scalar.as_py()
-                print(f"  {field.name}: {val}")
+        n_sample = min(batch.num_rows, 5)
+        if n_sample > 0:
+            print(f"Sample (first {n_sample} rows):")
+            for row in range(n_sample):
+                print(f"  row {row}:")
+                for i, field in enumerate(schema):
+                    val = format_value(batch.column(i)[row], field)
+                    print(f"    {field.name}: {val}")
 
 
 if __name__ == "__main__":
