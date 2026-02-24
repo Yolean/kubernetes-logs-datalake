@@ -166,7 +166,7 @@ else
   ERRORS=$((ERRORS + 1))
 fi
 
-# 7d. Schema comparison — arrow has CRI time (VARCHAR), parquet has epoch_ms (BIGINT)
+# 7d. Schema comparison — arrow has Timestamp(ns), parquet has Timestamp(ns, UTC)
 echo "==> Checking parquet schemas..."
 
 ARROW_TIME_TYPE=$(duckdb_s3 "
@@ -178,32 +178,33 @@ ARROW_TIME_TYPE=$(duckdb_s3 "
 PARQUET_TIME_TYPE=$(duckdb_s3 "
   SELECT column_type FROM (
     DESCRIBE SELECT * FROM read_parquet('s3://fluentbit-logs/dev/default/**/*.parquet', filename=true, hive_partitioning=false)
-  ) WHERE column_name='time_ms';
+  ) WHERE column_name='time';
 " | tr -d '[:space:]')
 
-if [[ "$ARROW_TIME_TYPE" == "VARCHAR" ]]; then
-  echo "  PASS: arrow format has time as VARCHAR (CRI timestamp string)"
+if [[ "$ARROW_TIME_TYPE" == "TIMESTAMP_NS" ]]; then
+  echo "  PASS: arrow format has time as TIMESTAMP_NS (native nanosecond timestamp)"
 else
-  echo "  FAIL: arrow format has time as '$ARROW_TIME_TYPE', expected VARCHAR" >&2
+  echo "  FAIL: arrow format has time as '$ARROW_TIME_TYPE', expected TIMESTAMP_NS" >&2
   ERRORS=$((ERRORS + 1))
 fi
 
-if [[ "$PARQUET_TIME_TYPE" == "BIGINT" ]]; then
-  echo "  PASS: parquet format has time_ms as BIGINT (epoch_ms)"
+# DuckDB reads Parquet isAdjustedToUTC=true timestamps as TIMESTAMP WITH TIME ZONE
+if [[ "$PARQUET_TIME_TYPE" == "TIMESTAMPWITHTIMEZONE" || "$PARQUET_TIME_TYPE" == "TIMESTAMP_NS" ]]; then
+  echo "  PASS: parquet format has time as $PARQUET_TIME_TYPE (native timestamp)"
 else
-  echo "  FAIL: parquet format has time_ms as '$PARQUET_TIME_TYPE', expected BIGINT" >&2
+  echo "  FAIL: parquet format has time as '$PARQUET_TIME_TYPE', expected TIMESTAMP WITH TIME ZONE or TIMESTAMP_NS" >&2
   ERRORS=$((ERRORS + 1))
 fi
 
-# 7e. Arrow time values are valid CRI timestamps (parseable, nanosecond precision)
+# 7e. Timestamp values are valid (parseable by DuckDB as timestamps)
 ARROW_TIME_SAMPLE=$(duckdb_s3 "
-  SELECT time FROM read_parquet('s3://fluentbit-logs/dev/default/**/*.arrow', filename=true, hive_partitioning=false) LIMIT 1;
+  SELECT time::VARCHAR FROM read_parquet('s3://fluentbit-logs/dev/default/**/*.arrow', filename=true, hive_partitioning=false) LIMIT 1;
 " | tr -d '[:space:]')
 
-if grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]+Z$' <<< "$ARROW_TIME_SAMPLE"; then
-  echo "  PASS: arrow time is a CRI timestamp: $ARROW_TIME_SAMPLE"
+if grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}' <<< "$ARROW_TIME_SAMPLE"; then
+  echo "  PASS: arrow time is a valid timestamp: $ARROW_TIME_SAMPLE"
 else
-  echo "  FAIL: arrow time is not a CRI timestamp: '$ARROW_TIME_SAMPLE'" >&2
+  echo "  FAIL: arrow time is not a valid timestamp: '$ARROW_TIME_SAMPLE'" >&2
   ERRORS=$((ERRORS + 1))
 fi
 

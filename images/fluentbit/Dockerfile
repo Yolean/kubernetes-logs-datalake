@@ -42,7 +42,10 @@ RUN set -ex; \
 RUN git clone --depth 1 --branch $FLB_VERSION https://github.com/fluent/fluent-bit.git /src/fluent-bit
 
 COPY *.patch /src/
-RUN cd /src/fluent-bit && git apply /src/*.patch
+COPY compact_columns.h compact_columns.c /src/fluent-bit/src/aws/compression/arrow/
+COPY apply-compact-compression.sh /src/
+RUN cd /src/fluent-bit && git apply /src/fix-gcs-header-lookup.patch
+RUN cd /src/fluent-bit && bash /src/apply-compact-compression.sh
 
 WORKDIR /src/fluent-bit/build
 
@@ -64,6 +67,14 @@ RUN cmake \
     ..
 
 RUN make -j$(nproc)
+
+# Unit test: compact_columns
+COPY test_compact_columns.c /src/
+RUN gcc -o /src/test_compact_columns /src/test_compact_columns.c \
+    /src/fluent-bit/src/aws/compression/arrow/compact_columns.c \
+    $(pkg-config --cflags --libs arrow-glib parquet-glib) \
+    -I/src/fluent-bit/src/aws/compression/arrow \
+    && /src/test_compact_columns
 
 RUN set -ex; \
   /src/fluent-bit/build/bin/fluent-bit --version; \

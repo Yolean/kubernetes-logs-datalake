@@ -5,8 +5,8 @@ set -euo pipefail
 # S3 path layout: /<cluster>/<namespace>/YYYY/MM/DD/<node>/<pod>/<container>/HH/MM/<uuid>.{arrow,parquet}
 #
 # Two formats are written by fluent-bit:
-#   .arrow   — CRI timestamps (nanosecond string), no epoch_ms conversion
-#   .parquet — epoch_ms timestamps (BIGINT), millisecond precision
+#   .arrow   — Timestamp(ns) without timezone (arrow-compact)
+#   .parquet — Timestamp(ns, UTC) with isAdjustedToUTC (parquet-compact)
 
 S3_ENDPOINT="localhost:30070"
 S3_BUCKET="fluentbit-logs"
@@ -21,15 +21,15 @@ Usage:
 Examples:
   y-logcli --context=dev query '{pod="app-abc12345-abcdef"}'
   y-logcli --context=dev query '{namespace="qa"}' --since=5m
-  y-logcli --context=dev query '{container="app"}' --since=1h
-  y-logcli --context=dev query '{namespace="default"}' -o raw
+  y-logcli --context=dev query '{container="app"}' --since=1h -o raw
+  y-logcli --context=dev query '{namespace="default"}' -o table
   y-logcli --context=dev query '{namespace="default"}' -f arrow
   y-logcli --context=dev query '{namespace="default"}' -f parquet
 
 Selectors: namespace, pod, container (comma-separated inside braces)
 Duration: s (seconds), m (minutes), h (hours)
 Output:  -o table (default), -o raw (like kubectl logs), -o lines (key=value per field)
-Format:  -f both (default), -f arrow (CRI timestamps), -f parquet (epoch_ms timestamps)
+Format:  -f both (default), -f arrow (Timestamp ns), -f parquet (Timestamp ns UTC)
 EOF
   exit 1
 }
@@ -148,10 +148,10 @@ SET s3_use_ssl = false;
 SET s3_url_style = 'path';"
 
 # Build per-format queries
-# Arrow format: CRI 'time' is a string like '2024-01-15T10:30:45.123456789Z'
-ARROW_TIME_EXPR="time::TIMESTAMPTZ"
-# Parquet format: 'time_ms' is epoch_ms BIGINT (added by json_date_key alongside CRI 'time')
-PARQUET_TIME_EXPR="epoch_ms(time_ms) AT TIME ZONE 'UTC'"
+# Arrow format: Timestamp(ns) without timezone — interpret as UTC for correct display
+ARROW_TIME_EXPR="time AT TIME ZONE 'UTC'"
+# Parquet format: Timestamp(ns, UTC) — DuckDB reads isAdjustedToUTC=true as TIMESTAMPTZ natively
+PARQUET_TIME_EXPR="time"
 
 build_where() {
   local time_expr="$1"
