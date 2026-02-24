@@ -5,8 +5,10 @@ set -euo pipefail
 # S3 path layout: /<cluster>/<namespace>/YYYY/MM/DD/<node>/<pod>/<container>/HH/MM/<uuid>.{arrow,parquet}
 #
 # Two formats are written by fluent-bit:
-#   .arrow   — Timestamp(ns) without timezone (arrow-compact)
-#   .parquet — Timestamp(ns, UTC) with isAdjustedToUTC (parquet-compact)
+#   .arrow   — Arrow IPC (Feather v2) with ZSTD body compression
+#   .parquet — Apache Parquet
+# Both use Timestamp(ns) without timezone annotation (UTC by convention).
+# DuckDB reads both as TIMESTAMP_NS preserving nanosecond precision.
 
 S3_ENDPOINT="localhost:30070"
 S3_BUCKET="fluentbit-logs"
@@ -30,7 +32,7 @@ Selectors: namespace, pod, container (comma-separated inside braces)
 Duration: s (seconds), m (minutes), h (hours)
 Output:  -o table (default), -o raw (like kubectl logs), -o lines (key=value per field),
          -o columns (compact: time pod container stream message)
-Format:  -f both (default), -f arrow (Timestamp ns), -f parquet (Timestamp ns UTC)
+Format:  -f both (default), -f arrow (.arrow IPC), -f parquet (.parquet)
 EOF
   exit 1
 }
@@ -150,10 +152,10 @@ SET s3_use_ssl = false;
 SET s3_url_style = 'path';"
 
 # Build per-format queries
-# Arrow format: Timestamp(ns) without timezone — interpret as UTC for correct display
-ARROW_TIME_EXPR="time AT TIME ZONE 'UTC'"
-# Parquet format: Timestamp(ns, UTC) — DuckDB reads isAdjustedToUTC=true as TIMESTAMPTZ natively
-PARQUET_TIME_EXPR="time"
+# Both formats write Timestamp(ns) without timezone annotation.
+# DuckDB reads these as TIMESTAMP_NS preserving nanosecond precision.
+# (With isAdjustedToUTC=true, DuckDB would map to TIMESTAMPTZ which is only microsecond.)
+TIME_EXPR="time"
 
 build_where() {
   local time_expr="$1"
@@ -169,8 +171,8 @@ build_where() {
 }
 
 # ISO 8601 with nanosecond precision in UTC.
-# ({t}) AT TIME ZONE 'UTC' extracts UTC as plain TIMESTAMP from TIMESTAMPTZ.
-NS_TIME_FMT="strftime(({t}) AT TIME ZONE 'UTC', '%Y-%m-%dT%H:%M:%S') || '.' || lpad((epoch_ns({t}) % 1000000000)::VARCHAR, 9, '0') || 'Z'"
+# Both formats store UTC Timestamp(ns) without timezone annotation.
+NS_TIME_FMT="strftime({t}, '%Y-%m-%dT%H:%M:%S') || '.' || lpad((epoch_ns({t}) % 1000000000)::VARCHAR, 9, '0') || 'Z'"
 
 build_select_cols() {
   local time_expr="$1"
@@ -193,21 +195,15 @@ build_union_select_cols() {
 
 build_query_for_format() {
   local fmt="$1" use_union_cols="${2:-false}"
-  local s3_path time_expr select_cols where_clause
+  local s3_path select_cols where_clause
   s3_path="$(build_s3_path "$fmt")"
 
-  if [[ "$fmt" == "arrow" ]]; then
-    time_expr="$ARROW_TIME_EXPR"
-  else
-    time_expr="$PARQUET_TIME_EXPR"
-  fi
-
   if [[ "$use_union_cols" == "true" ]]; then
-    select_cols="$(build_union_select_cols "$time_expr")"
+    select_cols="$(build_union_select_cols "$TIME_EXPR")"
   else
-    select_cols="$(build_select_cols "$time_expr")"
+    select_cols="$(build_select_cols "$TIME_EXPR")"
   fi
-  where_clause="$(build_where "$time_expr")"
+  where_clause="$(build_where "$TIME_EXPR")"
 
   local read_fn="read_parquet"
   local read_opts="filename=true, hive_partitioning=false"

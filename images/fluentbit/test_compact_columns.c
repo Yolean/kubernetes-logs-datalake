@@ -162,9 +162,9 @@ static gboolean write_and_read_parquet(GArrowTable *table, const char *path,
 
 static void test_arrow_compact(void)
 {
-    printf("\n--- Test: arrow-compact (no timezone) ---\n");
+    printf("\n--- Test: arrow-compact ---\n");
     GArrowTable *table = parse_test_json();
-    GArrowTable *compacted = compact_parquet_columns(table, FALSE);
+    GArrowTable *compacted = compact_parquet_columns(table);
     g_object_unref(table);
 
     ASSERT_MSG(compacted != NULL, "compact_parquet_columns returned non-NULL");
@@ -226,9 +226,9 @@ static void test_arrow_compact(void)
 
 static void test_parquet_compact(void)
 {
-    printf("\n--- Test: parquet-compact (UTC timezone) ---\n");
+    printf("\n--- Test: parquet-compact ---\n");
     GArrowTable *table = parse_test_json();
-    GArrowTable *compacted = compact_parquet_columns(table, TRUE);
+    GArrowTable *compacted = compact_parquet_columns(table);
     g_object_unref(table);
 
     ASSERT_MSG(compacted != NULL, "compact_parquet_columns returned non-NULL");
@@ -291,7 +291,7 @@ static void test_timestamp_values(void)
 {
     printf("\n--- Test: timestamp value correctness ---\n");
     GArrowTable *table = parse_test_json();
-    GArrowTable *compacted = compact_parquet_columns(table, TRUE);
+    GArrowTable *compacted = compact_parquet_columns(table);
     g_object_unref(table);
 
     GArrowSchema *schema = garrow_table_get_schema(compacted);

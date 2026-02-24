@@ -61,9 +61,12 @@ static int parse_cri_timestamp(const char *str, int64_t *nanos_out)
 
 /*
  * Replace the "time" column (string) with a Timestamp(ns) column.
+ * No timezone annotation — DuckDB reads Timestamp(ns) as TIMESTAMP_NS
+ * preserving nanosecond precision. (With isAdjustedToUTC=true, DuckDB maps
+ * to TIMESTAMP WITH TIME ZONE which is only microsecond precision.)
  * Returns a new table with the column replaced, or NULL on error.
  */
-static GArrowTable *compact_time_column(GArrowTable *table, gboolean is_utc)
+static GArrowTable *compact_time_column(GArrowTable *table)
 {
     GArrowSchema *schema;
     int col_idx;
@@ -86,14 +89,8 @@ static GArrowTable *compact_time_column(GArrowTable *table, gboolean is_utc)
         return NULL;
     }
 
-    /* Build timestamp data type */
-    if (is_utc) {
-        GTimeZone *tz = g_time_zone_new_utc();
-        ts_type = garrow_timestamp_data_type_new(GARROW_TIME_UNIT_NANO, tz);
-        g_time_zone_unref(tz);
-    } else {
-        ts_type = garrow_timestamp_data_type_new(GARROW_TIME_UNIT_NANO, NULL);
-    }
+    /* Timestamp(ns) without timezone — both formats store UTC by convention */
+    ts_type = garrow_timestamp_data_type_new(GARROW_TIME_UNIT_NANO, NULL);
 
     /* Process each chunk */
     guint n_chunks = garrow_chunked_array_get_n_chunks(chunked);
@@ -332,14 +329,14 @@ static GArrowTable *dict_encode_column(GArrowTable *table, const char *col_name)
     return result;
 }
 
-GArrowTable *compact_parquet_columns(GArrowTable *table, gboolean is_utc)
+GArrowTable *compact_parquet_columns(GArrowTable *table)
 {
     GArrowTable *current = table;
     GArrowTable *next;
     gboolean owns_current = FALSE;
 
     /* 1. Compact time column */
-    next = compact_time_column(current, is_utc);
+    next = compact_time_column(current);
     if (next) {
         if (owns_current) {
             g_object_unref(current);

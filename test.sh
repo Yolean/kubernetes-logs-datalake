@@ -247,7 +247,7 @@ else
   ERRORS=$((ERRORS + 1))
 fi
 
-# 7d. Schema comparison — arrow IPC has Timestamp(ns), parquet has Timestamp(ns, UTC)
+# 7d. Schema comparison — both formats should be Timestamp(ns) without timezone
 echo "==> Checking schemas..."
 
 # DuckDB nanoarrow read_arrow — may fail with dictionary-encoded columns
@@ -282,11 +282,11 @@ else
   ERRORS=$((ERRORS + 1))
 fi
 
-# DuckDB reads Parquet isAdjustedToUTC=true timestamps as TIMESTAMP WITH TIME ZONE
-if [[ "$PARQUET_TIME_TYPE" == "TIMESTAMPWITHTIMEZONE" || "$PARQUET_TIME_TYPE" == "TIMESTAMP_NS" ]]; then
-  echo "  PASS: parquet format has time as $PARQUET_TIME_TYPE (native timestamp)"
+# Both formats use Timestamp(ns) without timezone — DuckDB reads as TIMESTAMP_NS
+if [[ "$PARQUET_TIME_TYPE" == "TIMESTAMP_NS" ]]; then
+  echo "  PASS: parquet format has time as TIMESTAMP_NS (nanosecond precision)"
 else
-  echo "  FAIL: parquet format has time as '$PARQUET_TIME_TYPE', expected TIMESTAMP WITH TIME ZONE or TIMESTAMP_NS" >&2
+  echo "  FAIL: parquet format has time as '$PARQUET_TIME_TYPE', expected TIMESTAMP_NS" >&2
   ERRORS=$((ERRORS + 1))
 fi
 

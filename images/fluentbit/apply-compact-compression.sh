@@ -45,7 +45,7 @@ int out_s3_compress_arrow_compact(void *json, size_t size, void **out_buf, size_
             return -1;\
         }\
 \
-        compacted = compact_parquet_columns(table, FALSE);\
+        compacted = compact_parquet_columns(table);\
         g_object_unref(table);\
 \
         buffer = table_to_arrow_ipc_buffer(compacted);\
@@ -100,7 +100,7 @@ int out_s3_compress_parquet_compact(void *json, size_t size, void **out_buf, siz
             return -1;\
         }\
 \
-        compacted = compact_parquet_columns(table, TRUE);\
+        compacted = compact_parquet_columns(table);\
         g_object_unref(table);\
 \
         buffer = table_to_parquet_buffer(compacted);\
