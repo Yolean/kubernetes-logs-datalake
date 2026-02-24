@@ -58,7 +58,8 @@ echo "==> Building container images"
 echo "==> Importing images into k3d"
 k3d image import -c "$CLUSTER_NAME" \
   "$SCRIPT_DIR/images/fluentbit/target/images/fluentbit.tar" \
-  "$SCRIPT_DIR/images/versitygw/target/images/versitygw.tar"
+  "$SCRIPT_DIR/images/versitygw/target/images/versitygw.tar" \
+  "$SCRIPT_DIR/images/arrow-tools/target/images/arrow-tools.tar"
 
 # --- 4. Apply manifests ---
 
@@ -127,8 +128,8 @@ print_arrow_metadata() {
   local glob="$1"
   local sample
   sample=$(duckdb_s3 "SELECT file FROM glob('${glob}') ORDER BY file DESC LIMIT 1;")
-  echo "  --- arrow IPC (.arrow): $(basename "$sample") ---"
-  echo "  Schema (DESCRIBE read_arrow):"
+  echo "  --- arrow IPC (.arrow): $(basename "$sample") [DuckDB nanoarrow] ---"
+  echo "  Schema (DuckDB DESCRIBE read_arrow):"
   duckdb_s3_show "
     DESCRIBE SELECT * FROM read_arrow('${sample}');
   "
@@ -156,6 +157,14 @@ print_parquet_metadata() {
 echo "==> File metadata (one sample per format)..."
 print_arrow_metadata "s3://fluentbit-logs/dev/default/**/*.arrow"
 print_parquet_metadata "s3://fluentbit-logs/dev/default/**/*.parquet"
+
+echo "  --- pyarrow (independent Arrow IPC validation) ---"
+PYARROW_OUTPUT=$($KUBECTL run arrow-inspect --rm -i --restart=Never \
+  --image=yolean/arrow-tools:latest --image-pull-policy=Never \
+  --command -- python /usr/local/bin/inspect_arrow.py \
+  fluentbit-logs dev/default .arrow \
+  2>/dev/null) || true
+echo "$PYARROW_OUTPUT"
 
 echo "==> Running assertions..."
 
@@ -238,7 +247,22 @@ else
   ERRORS=$((ERRORS + 1))
 fi
 
-# 7e. Timestamp values are valid (parseable by DuckDB as timestamps)
+# 7e. pyarrow independent validation — confirms Arrow IPC is readable by official Apache Arrow
+if grep -q "timestamp\[ns\]" <<< "$PYARROW_OUTPUT"; then
+  echo "  PASS: pyarrow confirms time field is timestamp[ns]"
+else
+  echo "  FAIL: pyarrow did not find timestamp[ns] type in Arrow IPC" >&2
+  ERRORS=$((ERRORS + 1))
+fi
+
+if grep -q "string" <<< "$PYARROW_OUTPUT"; then
+  echo "  PASS: pyarrow confirms string fields present"
+else
+  echo "  FAIL: pyarrow did not find string type in Arrow IPC" >&2
+  ERRORS=$((ERRORS + 1))
+fi
+
+# 7f. Timestamp values are valid (parseable by DuckDB as timestamps)
 ARROW_TIME_SAMPLE=$(duckdb_s3 "
   SELECT time::VARCHAR FROM read_arrow('s3://fluentbit-logs/dev/default/**/*.arrow', filename=true) LIMIT 1;
 " | tr -d '[:space:]')
@@ -250,7 +274,7 @@ else
   ERRORS=$((ERRORS + 1))
 fi
 
-# 7f. Both formats produce the same data when queried through y-logcli
+# 7g. Both formats produce the same data when queried through y-logcli
 ARROW_COUNT=$(./y-logcli --context=dev query '{namespace="default"}' -f arrow -o raw 2>&1 | grep -c "hello from log-generator" || true)
 PARQUET_COUNT=$(./y-logcli --context=dev query '{namespace="default"}' -f parquet -o raw 2>&1 | grep -c "hello from log-generator" || true)
 
@@ -261,7 +285,7 @@ else
   ERRORS=$((ERRORS + 1))
 fi
 
-# 7g. SIGTERM flush - verify buffered data is flushed to S3 on shutdown
+# 7h. SIGTERM flush - verify buffered data is flushed to S3 on shutdown
 echo "==> Testing SIGTERM flush..."
 MARKER="sigterm-test-$(date +%s)"
 

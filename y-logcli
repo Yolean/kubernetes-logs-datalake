@@ -111,8 +111,9 @@ build_s3_path() {
     esac
   done
   # With namespace pushdown, date/node/pod/container are deeper in the tree
+  # Path: cluster/namespace/YYYY/MM/DD/node/pod/container/HH/MM/file
   if [[ "$pod" != "*" || "$container" != "*" ]]; then
-    echo "s3://${S3_BUCKET}/${CONTEXT}/${ns}/*/*/*/${pod}/${container}/**/*.${ext}"
+    echo "s3://${S3_BUCKET}/${CONTEXT}/${ns}/*/*/*/*/${pod}/${container}/**/*.${ext}"
   else
     echo "s3://${S3_BUCKET}/${CONTEXT}/${ns}/**/*.${ext}"
   fi

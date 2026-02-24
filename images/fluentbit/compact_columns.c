@@ -345,10 +345,10 @@ GArrowResizableBuffer *table_to_arrow_ipc_buffer(GArrowTable *table)
         return NULL;
     }
 
-    /* Uncompressed: nanoarrow/DuckDB cannot decode LZ4 Arrow IPC bodies */
+    /* ZSTD: nanoarrow/DuckDB supports ZSTD but not LZ4 for Arrow IPC bodies */
     props = garrow_feather_write_properties_new();
     g_object_set(props, "compression",
-                 GARROW_COMPRESSION_TYPE_UNCOMPRESSED, NULL);
+                 GARROW_COMPRESSION_TYPE_ZSTD, NULL);
 
     success = garrow_table_write_as_feather(
         table, GARROW_OUTPUT_STREAM(sink), props, &error);
