@@ -53,8 +53,8 @@ jobs:
         context: images/fluentbit
         load: true
         tags: fluentbit-test
-        cache-from: type=gha,scope=fluentbit
-        cache-to: type=gha,mode=max,scope=fluentbit
+        cache-from: type=gha,scope=fluentbit-test
+        cache-to: type=gha,mode=max,scope=fluentbit-test
 
     - run: ./test.sh
 
