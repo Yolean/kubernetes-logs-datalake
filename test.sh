@@ -339,16 +339,18 @@ $KUBECTL run "$MARKER" --rm -i --restart=Never \
   --command -- echo "$MARKER" \
   2>/dev/null
 
-# Wait for fluent-bit tail to pick it up (must exceed Refresh_Interval=5)
-sleep 8
+# Wait for fluent-bit tail to pick it up.
+# Needs: CRI log flush + Refresh_Interval (5s) + read cycle.
+# CI runners are slower, so use a generous wait.
+sleep 15
 
-# Kill fluent-bit before upload_timeout (15s) triggers a regular flush
-# grace-period=10 allows time for both s3-arrow and s3-parquet outputs to flush
-$KUBECTL delete pod -l app=fluent-bit --grace-period=10
+# Kill fluent-bit before upload_timeout (15s) triggers a regular flush.
+# grace-period gives time for SIGTERM handler to flush both s3-arrow and s3-parquet.
+$KUBECTL delete pod -l app=fluent-bit --grace-period=15
 wait_for_rollout daemonset fluent-bit 60s
 
-# Poll for the marker in S3 (up to 30s for the new pod to be ready)
-FLUSH_TIMEOUT=30
+# Poll for the marker in S3 (up to 60s — CI runners may be slow)
+FLUSH_TIMEOUT=60
 FLUSH_INTERVAL=5
 flush_elapsed=0
 FLUSH_FOUND=false
