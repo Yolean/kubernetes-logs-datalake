@@ -290,29 +290,25 @@ GArrowTable *compact_parquet_columns(GArrowTable *table, gboolean is_utc)
         owns_current = TRUE;
     }
 
-    /* 2-3. Dictionary-encode stream and logtag (Parquet only).
-     * For Arrow IPC (Feather), dictionary-encoded columns cause
-     * "DictionaryEncoding not supported" in nanoarrow/DuckDB readers.
-     * Parquet ignores Arrow-level dictionary types and applies its own
-     * RLE_DICTIONARY encoding at the page level anyway. */
-    if (is_utc) {
-        next = dict_encode_column(current, "stream");
-        if (next) {
-            if (owns_current) {
-                g_object_unref(current);
-            }
-            current = next;
-            owns_current = TRUE;
+    /* 2-3. Dictionary-encode stream and logtag.
+     * DuckDB/nanoarrow reads these back as plain VARCHAR, but tools using
+     * the official Arrow library (e.g. pyarrow) see dictionary type. */
+    next = dict_encode_column(current, "stream");
+    if (next) {
+        if (owns_current) {
+            g_object_unref(current);
         }
+        current = next;
+        owns_current = TRUE;
+    }
 
-        next = dict_encode_column(current, "logtag");
-        if (next) {
-            if (owns_current) {
-                g_object_unref(current);
-            }
-            current = next;
-            owns_current = TRUE;
+    next = dict_encode_column(current, "logtag");
+    if (next) {
+        if (owns_current) {
+            g_object_unref(current);
         }
+        current = next;
+        owns_current = TRUE;
     }
 
     /* If no transformations succeeded, ref the original so caller can unref */

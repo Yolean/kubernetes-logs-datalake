@@ -174,18 +174,18 @@ static void test_arrow_compact(void)
     }
     if (time_type) g_object_unref(time_type);
 
-    /* Arrow-compact: stream and logtag stay as plain strings
-     * (dictionary encoding breaks nanoarrow/DuckDB Arrow IPC readers) */
+    /* stream and logtag are dictionary-encoded in both paths.
+     * DuckDB/nanoarrow reads these as VARCHAR; pyarrow sees dictionary type. */
     GArrowDataType *stream_type = get_column_type(compacted, "stream");
     ASSERT_MSG(stream_type != NULL, "stream column exists");
-    ASSERT_MSG(GARROW_IS_STRING_DATA_TYPE(stream_type),
-               "stream is plain string (not dictionary-encoded for Arrow IPC compat)");
+    ASSERT_MSG(GARROW_IS_DICTIONARY_DATA_TYPE(stream_type),
+               "stream is dictionary-encoded");
     if (stream_type) g_object_unref(stream_type);
 
     GArrowDataType *logtag_type = get_column_type(compacted, "logtag");
     ASSERT_MSG(logtag_type != NULL, "logtag column exists");
-    ASSERT_MSG(GARROW_IS_STRING_DATA_TYPE(logtag_type),
-               "logtag is plain string (not dictionary-encoded for Arrow IPC compat)");
+    ASSERT_MSG(GARROW_IS_DICTIONARY_DATA_TYPE(logtag_type),
+               "logtag is dictionary-encoded");
     if (logtag_type) g_object_unref(logtag_type);
 
     /* Write to parquet and read back */
