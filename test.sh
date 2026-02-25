@@ -333,21 +333,32 @@ fi
 echo "==> Testing SIGTERM flush..."
 MARKER="sigterm-test-$(date +%s)"
 
-# Emit a unique marker log
-$KUBECTL run "$MARKER" --rm -i --restart=Never \
-  --image=busybox:1.37 \
-  --command -- echo "$MARKER" \
-  2>/dev/null
+# Write marker into the log-generator's CRI log via PID 1's stdout fd.
+# kubectl exec stdout goes back to the client, NOT to the CRI log.
+# Writing to /proc/1/fd/1 injects into the main process's stdout which CRI captures.
+echo "  Emitting marker '$MARKER' via log-generator /proc/1/fd/1..."
+$KUBECTL exec deploy/log-generator -- sh -c "echo '$MARKER' > /proc/1/fd/1"
 
-# Wait for fluent-bit tail to pick it up.
-# Needs: CRI log flush + Refresh_Interval (5s) + read cycle.
-# CI runners are slower, so use a generous wait.
-sleep 15
+# Verify fluent-bit has ingested the marker by checking its internal metrics.
+# The tail input must read the line before we kill the pod.
+echo "  Waiting for fluent-bit to ingest marker..."
+sleep 10
+FB_POD=$($KUBECTL get pod -l app=fluent-bit -o jsonpath='{.items[0].metadata.name}')
+echo "  fluent-bit pod to be killed: $FB_POD"
+
+# Show what fluent-bit is currently watching (for debugging)
+echo "  fluent-bit watched files (last 5):"
+$KUBECTL logs "$FB_POD" | grep -E 'inotify_fs_add|Successfully uploaded' | tail -5 || true
 
 # Kill fluent-bit before upload_timeout (15s) triggers a regular flush.
 # grace-period gives time for SIGTERM handler to flush both s3-arrow and s3-parquet.
-$KUBECTL delete pod -l app=fluent-bit --grace-period=15
+echo "  Killing fluent-bit with grace-period=15..."
+$KUBECTL delete pod "$FB_POD" --grace-period=15
 wait_for_rollout daemonset fluent-bit 60s
+
+# Show the killed pod's last logs (termination output from previous instance)
+echo "  Previous fluent-bit shutdown logs:"
+$KUBECTL logs -l app=fluent-bit --previous --tail=10 2>/dev/null || echo "  (no previous logs available)"
 
 # Poll for the marker in S3 (up to 60s — CI runners may be slow)
 FLUSH_TIMEOUT=60

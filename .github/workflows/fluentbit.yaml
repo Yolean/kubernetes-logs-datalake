@@ -3,15 +3,17 @@ name: fluentbit
 on:
   push:
     branches: [main]
-    paths:
-    - .github/workflows/fluentbit.yaml
-    - images/fluentbit/Dockerfile
-    - images/fluentbit/*.patch
+    paths-ignore:
+    - '*.md'
+    - 'howto/**'
+    - 'dev/**'
+    - 'ui/**'
   pull_request:
-    paths:
-    - .github/workflows/fluentbit.yaml
-    - images/fluentbit/Dockerfile
-    - images/fluentbit/*.patch
+    paths-ignore:
+    - '*.md'
+    - 'howto/**'
+    - 'dev/**'
+    - 'ui/**'
 
 permissions:
   contents: read
