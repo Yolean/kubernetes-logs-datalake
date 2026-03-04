@@ -384,6 +384,67 @@ else
   ERRORS=$((ERRORS + 1))
 fi
 
+# 7i. Concurrent SIGTERM flush — verify buffers from 20+ pods all flush within grace period.
+# Each pod×container×output creates a separate S3 buffer, so 25 pods × 2 outputs = 50 buffers.
+# Sequential flush would need ~50-100s; within 15s grace period proves concurrency.
+echo "==> Testing concurrent SIGTERM flush (25 pods)..."
+CONCURRENT_MARKER="concurrent-$(date +%s)"
+FLUSH_POD_COUNT=25
+
+for i in $(seq 1 $FLUSH_POD_COUNT); do
+  $KUBECTL run "flush-test-$i" --restart=Never \
+    --image=busybox:1.37 --labels=test=concurrent-flush \
+    --command -- sh -c "echo '${CONCURRENT_MARKER}-${i}'; sleep 3600" &
+done
+wait
+
+echo "  Waiting for $FLUSH_POD_COUNT pods to start..."
+$KUBECTL wait pod -l test=concurrent-flush --for=condition=Ready --timeout=60s
+
+# Refresh_Interval=5 means up to 5s for fluent-bit to discover new log files,
+# then Read_from_Head reads them immediately. Two refresh cycles for safety.
+echo "  Waiting for fluent-bit to discover and tail $FLUSH_POD_COUNT log files..."
+sleep 12
+
+FB_POD=$($KUBECTL get pod -l app=fluent-bit -o jsonpath='{.items[0].metadata.name}')
+echo "  Killing fluent-bit pod $FB_POD with grace-period=15..."
+$KUBECTL delete pod "$FB_POD" --grace-period=15
+wait_for_rollout daemonset fluent-bit 60s
+
+echo "  Previous fluent-bit shutdown logs:"
+$KUBECTL logs -l app=fluent-bit --previous --tail=15 2>/dev/null || echo "  (no previous logs available)"
+
+FLUSH_TIMEOUT=60
+FLUSH_INTERVAL=5
+flush_elapsed=0
+FOUND_COUNT=0
+
+while [ "$flush_elapsed" -lt "$FLUSH_TIMEOUT" ]; do
+  FLUSH_OUTPUT=$(./y-logcli --context=dev query '{namespace="default"}' -f parquet -o raw 2>&1) || true
+  # Count distinct pod markers (not lines — duplicates from re-reads would inflate grep -c)
+  FOUND_COUNT=0
+  for i in $(seq 1 $FLUSH_POD_COUNT); do
+    if grep -q "${CONCURRENT_MARKER}-${i}\b" <<< "$FLUSH_OUTPUT"; then
+      FOUND_COUNT=$((FOUND_COUNT + 1))
+    fi
+  done
+  if [ "$FOUND_COUNT" -ge "$FLUSH_POD_COUNT" ]; then
+    break
+  fi
+  flush_elapsed=$((flush_elapsed + FLUSH_INTERVAL))
+  echo "  Found $FOUND_COUNT/$FLUSH_POD_COUNT markers, retrying... (${flush_elapsed}/${FLUSH_TIMEOUT}s)"
+  sleep "$FLUSH_INTERVAL"
+done
+
+if [ "$FOUND_COUNT" -ge "$FLUSH_POD_COUNT" ]; then
+  echo "  PASS: Concurrent flush — all $FLUSH_POD_COUNT pod markers found in S3 (50 buffers flushed within 15s)"
+else
+  echo "  FAIL: Concurrent flush — only $FOUND_COUNT/$FLUSH_POD_COUNT pod markers found (buffers lost on SIGTERM)" >&2
+  ERRORS=$((ERRORS + 1))
+fi
+
+$KUBECTL delete pod -l test=concurrent-flush --grace-period=0 --force 2>/dev/null || true
+
 # --- 8. Result ---
 
 echo ""
