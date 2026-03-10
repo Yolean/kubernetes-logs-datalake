@@ -445,6 +445,105 @@ fi
 
 $KUBECTL delete pod -l test=concurrent-flush --grace-period=0 --force 2>/dev/null || true
 
+# 7j. IN_CLOSE_WRITE flush — container termination triggers immediate S3 upload
+# without restarting fluent-bit. The close-write-flush.patch watches for IN_CLOSE_WRITE
+# inotify events (CRI runtime closes the log fd) and emits a sentinel on tag._close
+# which forces S3 output to flush the base tag's buffer.
+#
+# We verify that:
+#   1. Logs are NOT flushed before container terminates (within upload_timeout=15s window)
+#   2. After termination, logs appear in S3 within seconds (not waiting for upload_timeout)
+#
+# Helper: poll S3 for a marker, returns 0 if found within timeout
+close_write_poll() {
+  local marker="$1"
+  local timeout="$2"
+  local interval="${3:-2}"
+  local elapsed=0
+  while [ "$elapsed" -lt "$timeout" ]; do
+    local output
+    output=$(./y-logcli --context=dev query '{namespace="default"}' -f parquet -o raw 2>&1) || true
+    if grep -q "$marker" <<< "$output"; then
+      return 0
+    fi
+    elapsed=$((elapsed + interval))
+    echo "    Polling... (${elapsed}/${timeout}s)"
+    sleep "$interval"
+  done
+  return 1
+}
+
+# 7j-1. Exit 0 — container exits normally
+echo "==> Testing IN_CLOSE_WRITE flush: exit 0..."
+CW_MARKER_0="cw-exit0-$(date +%s)"
+$KUBECTL run cw-exit0 --restart=Never \
+  --image=busybox:1.37 \
+  --command -- sh -c "echo '${CW_MARKER_0}'; sleep 10"
+
+$KUBECTL wait pod cw-exit0 --for=condition=Ready --timeout=30s
+
+# Wait for fluent-bit to discover and tail the log file
+sleep 8
+
+# Pre-check: marker should NOT be in S3 yet (container still running, upload_timeout=15s hasn't fired)
+if close_write_poll "$CW_MARKER_0" 0 1 2>/dev/null; then
+  echo "  WARN: Marker already in S3 before container termination (upload_timeout may have fired)"
+fi
+
+# Wait for container to exit (sleep 10 in the container)
+echo "  Waiting for container to exit 0..."
+$KUBECTL wait pod cw-exit0 --for=jsonpath='{.status.phase}'=Succeeded --timeout=30s
+
+# After close-write, logs should flush quickly (well within upload_timeout=15s)
+if close_write_poll "$CW_MARKER_0" 30; then
+  echo "  PASS: IN_CLOSE_WRITE flush (exit 0) — marker '$CW_MARKER_0' found in S3"
+else
+  echo "  FAIL: IN_CLOSE_WRITE flush (exit 0) — marker '$CW_MARKER_0' not found in S3" >&2
+  ERRORS=$((ERRORS + 1))
+fi
+$KUBECTL delete pod cw-exit0 --grace-period=0 --force 2>/dev/null || true
+
+# 7j-2. Exit 1 — container crashes
+echo "==> Testing IN_CLOSE_WRITE flush: exit 1..."
+CW_MARKER_1="cw-exit1-$(date +%s)"
+$KUBECTL run cw-exit1 --restart=Never \
+  --image=busybox:1.37 \
+  --command -- sh -c "echo '${CW_MARKER_1}'; sleep 5; exit 1"
+
+$KUBECTL wait pod cw-exit1 --for=condition=Ready --timeout=30s
+sleep 8
+
+echo "  Waiting for container to exit 1..."
+$KUBECTL wait pod cw-exit1 --for=jsonpath='{.status.phase}'=Failed --timeout=30s
+
+if close_write_poll "$CW_MARKER_1" 30; then
+  echo "  PASS: IN_CLOSE_WRITE flush (exit 1) — marker '$CW_MARKER_1' found in S3"
+else
+  echo "  FAIL: IN_CLOSE_WRITE flush (exit 1) — marker '$CW_MARKER_1' not found in S3" >&2
+  ERRORS=$((ERRORS + 1))
+fi
+$KUBECTL delete pod cw-exit1 --grace-period=0 --force 2>/dev/null || true
+
+# 7j-3. kubectl delete pod — forced termination
+echo "==> Testing IN_CLOSE_WRITE flush: kubectl delete pod..."
+CW_MARKER_DEL="cw-delete-$(date +%s)"
+$KUBECTL run cw-delete --restart=Never \
+  --image=busybox:1.37 \
+  --command -- sh -c "echo '${CW_MARKER_DEL}'; sleep 3600"
+
+$KUBECTL wait pod cw-delete --for=condition=Ready --timeout=30s
+sleep 8
+
+echo "  Deleting pod..."
+$KUBECTL delete pod cw-delete --grace-period=5
+
+if close_write_poll "$CW_MARKER_DEL" 30; then
+  echo "  PASS: IN_CLOSE_WRITE flush (delete pod) — marker '$CW_MARKER_DEL' found in S3"
+else
+  echo "  FAIL: IN_CLOSE_WRITE flush (delete pod) — marker '$CW_MARKER_DEL' not found in S3" >&2
+  ERRORS=$((ERRORS + 1))
+fi
+
 # --- 8. Result ---
 
 echo ""

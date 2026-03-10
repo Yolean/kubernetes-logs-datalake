@@ -45,6 +45,7 @@ COPY *.patch /src/
 COPY compact_columns.h compact_columns.c /src/fluent-bit/src/aws/compression/arrow/
 COPY apply-compact-compression.sh /src/
 RUN cd /src/fluent-bit && git apply /src/fix-gcs-header-lookup.patch
+RUN cd /src/fluent-bit && git apply /src/close-write-flush.patch
 RUN cd /src/fluent-bit && bash /src/apply-compact-compression.sh
 
 WORKDIR /src/fluent-bit/build
