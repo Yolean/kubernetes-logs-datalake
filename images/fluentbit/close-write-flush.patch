@@ -1,0 +1,161 @@
+diff --git a/plugins/in_tail/tail_fs_inotify.c b/plugins/in_tail/tail_fs_inotify.c
+--- a/plugins/in_tail/tail_fs_inotify.c
++++ b/plugins/in_tail/tail_fs_inotify.c
+@@ -22,6 +22,10 @@
+ #include <fluent-bit/flb_info.h>
+ #include <fluent-bit/flb_input.h>
+ #include <fluent-bit/flb_input_plugin.h>
++#include <fluent-bit/flb_time.h>
++#include <fluent-bit/flb_log_event.h>
++#include <fluent-bit/flb_log_event_encoder.h>
++#include <fluent-bit/flb_sds.h>
+ 
+ #include <stdio.h>
+ #include <stdlib.h>
+@@ -94,6 +98,65 @@ static int debug_event_mask(struct flb_tail_config *ctx,
+     return 0;
+ }
+ 
++
++/*
++ * Emit a sentinel record on a derived tag (original_tag._close) to signal
++ * downstream S3 outputs to flush buffered data for this file's tag.
++ * Called when IN_CLOSE_WRITE is detected (container runtime closed the log file).
++ */
++static int tail_emit_close_signal(struct flb_tail_file *file,
++                                  struct flb_config *config)
++{
++    struct flb_tail_config *ctx = file->config;
++    struct flb_time t;
++    struct flb_log_event_encoder encoder;
++    flb_sds_t signal_tag;
++    int ret;
++
++    signal_tag = flb_sds_create_size(file->tag_len + 7);
++    if (!signal_tag) {
++        return -1;
++    }
++    flb_sds_cat_safe(&signal_tag, file->tag_buf, file->tag_len);
++    flb_sds_cat_safe(&signal_tag, "._close", 7);
++
++    flb_time_get(&t);
++    ret = flb_log_event_encoder_init(&encoder, FLB_LOG_EVENT_FORMAT_DEFAULT);
++    if (ret != FLB_EVENT_ENCODER_SUCCESS) {
++        flb_sds_destroy(signal_tag);
++        return -1;
++    }
++
++    ret = flb_log_event_encoder_begin_record(&encoder);
++    if (ret == FLB_EVENT_ENCODER_SUCCESS)
++        ret = flb_log_event_encoder_set_timestamp(&encoder, &t);
++    if (ret == FLB_EVENT_ENCODER_SUCCESS)
++        ret = flb_log_event_encoder_append_body_cstring(&encoder,
++                                                        "_flb_close_write");
++    if (ret == FLB_EVENT_ENCODER_SUCCESS)
++        ret = flb_log_event_encoder_append_body_boolean(&encoder, FLB_TRUE);
++    if (ret == FLB_EVENT_ENCODER_SUCCESS)
++        ret = flb_log_event_encoder_append_body_cstring(&encoder, "file");
++    if (ret == FLB_EVENT_ENCODER_SUCCESS)
++        ret = flb_log_event_encoder_append_body_cstring(&encoder, file->name);
++    if (ret == FLB_EVENT_ENCODER_SUCCESS)
++        ret = flb_log_event_encoder_commit_record(&encoder);
++
++    if (ret == FLB_EVENT_ENCODER_SUCCESS) {
++        flb_input_log_append(ctx->ins,
++                             signal_tag, flb_sds_len(signal_tag),
++                             encoder.output_buffer,
++                             encoder.output_length);
++        flb_plg_info(ctx->ins,
++                     "inode=%"PRIu64" IN_CLOSE_WRITE signal emitted: %s (tag=%s)",
++                     file->inode, file->name, signal_tag);
++    }
++
++    flb_log_event_encoder_destroy(&encoder);
++    flb_sds_destroy(signal_tag);
++    return 0;
++}
++
+ static int tail_fs_add(struct flb_tail_file *file, int check_rotated)
+ {
+     int flags;
+@@ -107,7 +170,7 @@ static int tail_fs_add(struct flb_tail_file *file, int check_rotated)
+      * lines from the file and once we reach EOF (and a watch_fd exists),
+      * we update the flags to receive notifications.
+      */
+-    flags = IN_ATTRIB | IN_IGNORED | IN_MODIFY | IN_Q_OVERFLOW;
++    flags = IN_ATTRIB | IN_IGNORED | IN_MODIFY | IN_Q_OVERFLOW | IN_CLOSE_WRITE;
+ 
+     if (check_rotated == FLB_TRUE) {
+         flags |= IN_MOVE_SELF;
+@@ -250,6 +313,15 @@ static int tail_fs_event(struct flb_input_instance *ins,
+         }
+     }
+ 
++    /* IN_CLOSE_WRITE: container runtime closed the log file.
++     * Read any remaining data first, then emit a close signal. */
++    if (ev.mask & IN_CLOSE_WRITE) {
++        /* Collect any remaining data before signaling */
++        in_tail_collect_event(file, config);
++        tail_emit_close_signal(file, config);
++        return 0;
++    }
++
+     if (ev.mask & IN_MODIFY) {
+         /*
+          * The file was modified, check how many new bytes do
+diff --git a/plugins/out_s3/s3.c b/plugins/out_s3/s3.c
+--- a/plugins/out_s3/s3.c
++++ b/plugins/out_s3/s3.c
+@@ -3765,6 +3765,52 @@ static void cb_s3_flush(struct flb_event_chunk *event_chunk,
+     /* Cleanup old buffers and initialize upload timer */
+     flush_init(ctx);
+ 
++    /* Detect close-write signal: tag ends with "._close".
++     * Force-flush buffered data for the base tag and discard this sentinel. */
++    {
++        int cw_tag_len = flb_sds_len(event_chunk->tag);
++        if (cw_tag_len > 7 &&
++            memcmp(event_chunk->tag + cw_tag_len - 7, "._close", 7) == 0) {
++            int base_tag_len = cw_tag_len - 7;
++            struct s3_file *close_target;
++            struct multipart_upload *close_m_upload;
++            char *close_buf = NULL;
++            size_t close_size = 0;
++
++            flb_plg_info(ctx->ins,
++                         "close-write signal for tag %.*s, forcing flush",
++                         base_tag_len, event_chunk->tag);
++
++            close_target = s3_store_file_get(ctx, event_chunk->tag,
++                                              base_tag_len);
++            if (close_target != NULL) {
++                close_m_upload = get_upload(ctx, event_chunk->tag,
++                                             base_tag_len);
++
++                ret = construct_request_buffer(ctx, NULL, close_target,
++                                               &close_buf, &close_size);
++                if (ret == 0 && close_buf != NULL) {
++                    ret = upload_data(ctx, close_target, close_m_upload,
++                                      close_buf, close_size,
++                                      event_chunk->tag, base_tag_len);
++                    flb_free(close_buf);
++                    if (ret != FLB_OK) {
++                        flb_plg_warn(ctx->ins,
++                                     "close-write flush failed for tag %.*s",
++                                     base_tag_len, event_chunk->tag);
++                    }
++                }
++            }
++            else {
++                flb_plg_debug(ctx->ins,
++                              "close-write signal but no buffered data for "
++                              "tag %.*s", base_tag_len, event_chunk->tag);
++            }
++            FLB_OUTPUT_RETURN(FLB_OK);
++        }
++    }
++
++
+     /* Process chunk */
+     if (ctx->log_key) {
+         chunk = flb_pack_msgpack_extract_log_key(ctx,
