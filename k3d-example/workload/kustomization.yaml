@@ -4,3 +4,4 @@ kind: Kustomization
 
 resources:
 - workload.yaml
+- turbo-stub.yaml

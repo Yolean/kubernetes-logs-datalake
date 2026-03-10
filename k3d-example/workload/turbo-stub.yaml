@@ -1,0 +1,55 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: turbo-stub
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: turbo-stub
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsUser: 65534
+        runAsGroup: 65534
+      containers:
+      - name: step-build
+        image: busybox:1.37
+        command:
+        - /bin/sh
+        - -c
+        args:
+        - |
+          # Simulate a turborepo build with mixed results.
+          # These patterns match detect-ci.js from checkit/logs/server.
+          sleep 2
+
+          echo "@yolean/ui:lint: cache hit, replaying output 49382abc"
+          sleep 0.1
+          echo "@yolean/ui:lint: cache hit, suppressing logs 49382abc"
+          sleep 0.1
+          echo "@yolean/bin-lib:lint: cache hit, replaying output a1b2c3d4"
+          sleep 0.5
+
+          echo "@yolean/bin-lib:build: Done in 2.1s"
+          sleep 0.1
+          echo "@yolean/ui:build: Done in 4.7s"
+          sleep 0.5
+
+          echo "@yolean/api:build: building..."
+          sleep 1
+          echo "@yolean/api:build: src/handler.ts(42,5): error TS2345: Argument of type" >&2
+          echo "@yolean/api:build: ERROR: command finished with error:" >&2
+          sleep 0.1
+          echo "@yolean/e2e:test: running..."
+          sleep 0.5
+          echo "@yolean/e2e:test: command finished with error, but continuing..." >&2
+          sleep 0.5
+
+          echo ""
+          echo " Tasks:    3 successful, 2 failed, 2 cached, 7 total"
+          echo " Failed:   @yolean/api:build, @yolean/e2e:test"
+          echo " Cached:   2 cached, 7 total"
+          echo " Time:     9.4s"
+          sleep 1
