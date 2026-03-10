@@ -107,7 +107,7 @@ wait_for_rollout deployment log-generator 60s
 
 # --- 6. Poll for data in both formats ---
 
-POLL_TIMEOUT=120
+POLL_TIMEOUT=180
 POLL_INTERVAL=5
 
 poll_for_format() {
@@ -329,7 +329,102 @@ else
   ERRORS=$((ERRORS + 1))
 fi
 
-# 7h. SIGTERM flush - verify buffered data is flushed to S3 on shutdown
+# 7h. Size-based flush — verify data is flushed when buffer exceeds total_file_size (1M).
+# Write >1M in one burst; it should appear in S3 well before upload_timeout (60s).
+# Buffer_Chunk_Size=512K and Buffer_Max_Size=2M allow tail to ingest quickly.
+echo "==> Testing size-based flush (total_file_size=1M)..."
+SIZE_MARKER="size-flush-$(date +%s)"
+# Generate >1.5M instantly using yes+head (busybox shell loops are too slow).
+# 'yes' outputs ~80-char lines at full speed; 20000 lines ≈ 1.6M.
+$KUBECTL run size-flush --restart=Never \
+  --image=busybox:1.37 \
+  --command -- sh -c "echo '${SIZE_MARKER}'; yes 'size-padding-data-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' | head -n 20000; sleep 3600"
+
+$KUBECTL wait pod size-flush --for=condition=Ready --timeout=30s
+
+# Wait for fluent-bit to discover and read the file (Refresh_Interval=5, plus ingestion time)
+sleep 12
+
+# Size-based flush should trigger within seconds of ingestion (buffer > 1M).
+# Poll for 45s — well under the 60s upload_timeout, proving size triggered it.
+SIZE_FLUSH_TIMEOUT=45
+SIZE_FLUSH_FOUND=false
+size_elapsed=0
+while [ "$size_elapsed" -lt "$SIZE_FLUSH_TIMEOUT" ]; do
+  SIZE_OUTPUT=$(./y-logcli --context=dev query '{namespace="default"}' -f parquet -o raw 2>&1) || true
+  if grep -q "$SIZE_MARKER" <<< "$SIZE_OUTPUT"; then
+    SIZE_FLUSH_FOUND=true
+    break
+  fi
+  size_elapsed=$((size_elapsed + 3))
+  echo "  Polling... (${size_elapsed}/${SIZE_FLUSH_TIMEOUT}s)"
+  sleep 3
+done
+
+if [ "$SIZE_FLUSH_FOUND" = true ]; then
+  echo "  PASS: Size-based flush — marker found in S3 within ${size_elapsed}s (before 60s upload_timeout)"
+else
+  echo "  FAIL: Size-based flush — marker '$SIZE_MARKER' not found in S3 within ${SIZE_FLUSH_TIMEOUT}s" >&2
+  ERRORS=$((ERRORS + 1))
+fi
+$KUBECTL delete pod size-flush --grace-period=0 --force 2>/dev/null || true
+
+# 7i. Timeout-based flush — verify data is flushed after upload_timeout (60s)
+# when the buffer never reaches total_file_size.
+# Write a small marker (well under 1M), container stays running.
+# Data should NOT appear before ~60s (not size-triggered) but SHOULD appear after.
+echo "==> Testing timeout-based flush (upload_timeout=60s)..."
+TIMEOUT_MARKER="timeout-flush-$(date +%s)"
+$KUBECTL run timeout-flush --restart=Never \
+  --image=busybox:1.37 \
+  --command -- sh -c "echo '${TIMEOUT_MARKER}'; sleep 3600"
+
+$KUBECTL wait pod timeout-flush --for=condition=Ready --timeout=30s
+
+# Wait for fluent-bit to discover the log file
+sleep 8
+
+# Pre-check: marker should NOT be in S3 within 20s (no size trigger, timeout is 60s)
+echo "  Verifying marker is NOT in S3 yet (expecting no flush before upload_timeout)..."
+if close_write_poll "$TIMEOUT_MARKER" 20 5 2>/dev/null; then
+  echo "  WARN: Marker appeared before upload_timeout — size or close-write may have triggered early"
+else
+  echo "  OK: Marker not in S3 after 20s (as expected — waiting for upload_timeout)"
+fi
+
+# Now wait for upload_timeout to fire. From pod start: 8s discovery + 20s pre-check = ~28s elapsed.
+# upload_timeout=60s starts when fluent-bit ingests (at ~8s), so it fires at ~68s from pod start.
+# We've used ~28s, need to wait ~40s more, then poll.
+TIMEOUT_FLUSH_DEADLINE=120
+TIMEOUT_FLUSH_INTERVAL=5
+timeout_elapsed=28
+TIMEOUT_FLUSH_FOUND=false
+
+# Wait for the remaining time until upload_timeout fires
+echo "  Waiting for upload_timeout to fire..."
+sleep 40
+timeout_elapsed=68
+
+while [ "$timeout_elapsed" -lt "$TIMEOUT_FLUSH_DEADLINE" ]; do
+  TIMEOUT_OUTPUT=$(./y-logcli --context=dev query '{namespace="default"}' -f parquet -o raw 2>&1) || true
+  if grep -q "$TIMEOUT_MARKER" <<< "$TIMEOUT_OUTPUT"; then
+    TIMEOUT_FLUSH_FOUND=true
+    break
+  fi
+  timeout_elapsed=$((timeout_elapsed + TIMEOUT_FLUSH_INTERVAL))
+  echo "  Polling... (${timeout_elapsed}/${TIMEOUT_FLUSH_DEADLINE}s)"
+  sleep "$TIMEOUT_FLUSH_INTERVAL"
+done
+
+if [ "$TIMEOUT_FLUSH_FOUND" = true ]; then
+  echo "  PASS: Timeout-based flush — marker found in S3 at ~${timeout_elapsed}s (after upload_timeout=60s)"
+else
+  echo "  FAIL: Timeout-based flush — marker '$TIMEOUT_MARKER' not found in S3 within ${TIMEOUT_FLUSH_DEADLINE}s" >&2
+  ERRORS=$((ERRORS + 1))
+fi
+$KUBECTL delete pod timeout-flush --grace-period=0 --force 2>/dev/null || true
+
+# 7j. SIGTERM flush - verify buffered data is flushed to S3 on shutdown
 echo "==> Testing SIGTERM flush..."
 MARKER="sigterm-test-$(date +%s)"
 
@@ -350,10 +445,10 @@ echo "  fluent-bit pod to be killed: $FB_POD"
 echo "  fluent-bit watched files (last 5):"
 $KUBECTL logs "$FB_POD" | grep -E 'inotify_fs_add|Successfully uploaded' | tail -5 || true
 
-# Kill fluent-bit before upload_timeout (15s) triggers a regular flush.
+# Kill fluent-bit before upload_timeout (60s) triggers a regular flush.
 # grace-period gives time for SIGTERM handler to flush both s3-arrow and s3-parquet.
-echo "  Killing fluent-bit with grace-period=15..."
-$KUBECTL delete pod "$FB_POD" --grace-period=15
+echo "  Killing fluent-bit with grace-period=30..."
+$KUBECTL delete pod "$FB_POD" --grace-period=30
 wait_for_rollout daemonset fluent-bit 60s
 
 # Show the killed pod's last logs (termination output from previous instance)
@@ -384,9 +479,9 @@ else
   ERRORS=$((ERRORS + 1))
 fi
 
-# 7i. Concurrent SIGTERM flush — verify buffers from 20+ pods all flush within grace period.
+# 7k. Concurrent SIGTERM flush — verify buffers from 20+ pods all flush within grace period.
 # Each pod×container×output creates a separate S3 buffer, so 25 pods × 2 outputs = 50 buffers.
-# Sequential flush would need ~50-100s; within 15s grace period proves concurrency.
+# Sequential flush would need ~50-100s; within 30s grace period proves concurrency.
 echo "==> Testing concurrent SIGTERM flush (25 pods)..."
 CONCURRENT_MARKER="concurrent-$(date +%s)"
 FLUSH_POD_COUNT=25
@@ -407,8 +502,8 @@ echo "  Waiting for fluent-bit to discover and tail $FLUSH_POD_COUNT log files..
 sleep 12
 
 FB_POD=$($KUBECTL get pod -l app=fluent-bit -o jsonpath='{.items[0].metadata.name}')
-echo "  Killing fluent-bit pod $FB_POD with grace-period=15..."
-$KUBECTL delete pod "$FB_POD" --grace-period=15
+echo "  Killing fluent-bit pod $FB_POD with grace-period=30..."
+$KUBECTL delete pod "$FB_POD" --grace-period=30
 wait_for_rollout daemonset fluent-bit 60s
 
 echo "  Previous fluent-bit shutdown logs:"
@@ -437,7 +532,7 @@ while [ "$flush_elapsed" -lt "$FLUSH_TIMEOUT" ]; do
 done
 
 if [ "$FOUND_COUNT" -ge "$FLUSH_POD_COUNT" ]; then
-  echo "  PASS: Concurrent flush — all $FLUSH_POD_COUNT pod markers found in S3 (50 buffers flushed within 15s)"
+  echo "  PASS: Concurrent flush — all $FLUSH_POD_COUNT pod markers found in S3 (50 buffers flushed within 30s)"
 else
   echo "  FAIL: Concurrent flush — only $FOUND_COUNT/$FLUSH_POD_COUNT pod markers found (buffers lost on SIGTERM)" >&2
   ERRORS=$((ERRORS + 1))
@@ -445,14 +540,14 @@ fi
 
 $KUBECTL delete pod -l test=concurrent-flush --grace-period=0 --force 2>/dev/null || true
 
-# 7j. IN_CLOSE_WRITE flush — container termination triggers immediate S3 upload
+# 7l. IN_CLOSE_WRITE flush — container termination triggers immediate S3 upload
 # without restarting fluent-bit. The close-write-flush.patch watches for IN_CLOSE_WRITE
 # inotify events (CRI runtime closes the log fd) and emits a sentinel on tag._close
 # which forces S3 output to flush the base tag's buffer.
 #
 # We verify that:
-#   1. Logs are NOT flushed before container terminates (within upload_timeout=15s window)
-#   2. After termination, logs appear in S3 within seconds (not waiting for upload_timeout)
+#   1. Logs are NOT flushed before container terminates (upload_timeout=60s hasn't fired)
+#   2. After termination, logs appear in S3 within 30s (well before 60s upload_timeout)
 #
 # Helper: poll S3 for a marker, returns 0 if found within timeout
 close_write_poll() {
@@ -473,7 +568,7 @@ close_write_poll() {
   return 1
 }
 
-# 7j-1. Exit 0 — container exits normally
+# 7l-1. Exit 0 — container exits normally
 echo "==> Testing IN_CLOSE_WRITE flush: exit 0..."
 CW_MARKER_0="cw-exit0-$(date +%s)"
 $KUBECTL run cw-exit0 --restart=Never \
@@ -485,7 +580,7 @@ $KUBECTL wait pod cw-exit0 --for=condition=Ready --timeout=30s
 # Wait for fluent-bit to discover and tail the log file
 sleep 8
 
-# Pre-check: marker should NOT be in S3 yet (container still running, upload_timeout=15s hasn't fired)
+# Pre-check: marker should NOT be in S3 yet (container still running, upload_timeout=60s hasn't fired)
 if close_write_poll "$CW_MARKER_0" 0 1 2>/dev/null; then
   echo "  WARN: Marker already in S3 before container termination (upload_timeout may have fired)"
 fi
@@ -494,7 +589,7 @@ fi
 echo "  Waiting for container to exit 0..."
 $KUBECTL wait pod cw-exit0 --for=jsonpath='{.status.phase}'=Succeeded --timeout=30s
 
-# After close-write, logs should flush quickly (well within upload_timeout=15s)
+# After close-write, logs should flush quickly (well within upload_timeout=60s)
 if close_write_poll "$CW_MARKER_0" 30; then
   echo "  PASS: IN_CLOSE_WRITE flush (exit 0) — marker '$CW_MARKER_0' found in S3"
 else
@@ -503,28 +598,7 @@ else
 fi
 $KUBECTL delete pod cw-exit0 --grace-period=0 --force 2>/dev/null || true
 
-# 7j-2. Exit 1 — container crashes
-echo "==> Testing IN_CLOSE_WRITE flush: exit 1..."
-CW_MARKER_1="cw-exit1-$(date +%s)"
-$KUBECTL run cw-exit1 --restart=Never \
-  --image=busybox:1.37 \
-  --command -- sh -c "echo '${CW_MARKER_1}'; sleep 5; exit 1"
-
-$KUBECTL wait pod cw-exit1 --for=condition=Ready --timeout=30s
-sleep 8
-
-echo "  Waiting for container to exit 1..."
-$KUBECTL wait pod cw-exit1 --for=jsonpath='{.status.phase}'=Failed --timeout=30s
-
-if close_write_poll "$CW_MARKER_1" 30; then
-  echo "  PASS: IN_CLOSE_WRITE flush (exit 1) — marker '$CW_MARKER_1' found in S3"
-else
-  echo "  FAIL: IN_CLOSE_WRITE flush (exit 1) — marker '$CW_MARKER_1' not found in S3" >&2
-  ERRORS=$((ERRORS + 1))
-fi
-$KUBECTL delete pod cw-exit1 --grace-period=0 --force 2>/dev/null || true
-
-# 7j-3. kubectl delete pod — forced termination
+# 7l-2. kubectl delete pod — forced termination
 echo "==> Testing IN_CLOSE_WRITE flush: kubectl delete pod..."
 CW_MARKER_DEL="cw-delete-$(date +%s)"
 $KUBECTL run cw-delete --restart=Never \

@@ -1,21 +1,22 @@
 diff --git a/plugins/in_tail/tail_fs_inotify.c b/plugins/in_tail/tail_fs_inotify.c
 --- a/plugins/in_tail/tail_fs_inotify.c
 +++ b/plugins/in_tail/tail_fs_inotify.c
-@@ -20,6 +20,10 @@
+@@ -22,6 +22,10 @@
+ #include <fluent-bit/flb_info.h>
+ #include <fluent-bit/flb_input.h>
  #include <fluent-bit/flb_input_plugin.h>
- #include <fluent-bit/flb_config.h>
- #include <fluent-bit/flb_utils.h>
 +#include <fluent-bit/flb_time.h>
 +#include <fluent-bit/flb_log_event.h>
 +#include <fluent-bit/flb_log_event_encoder.h>
 +#include <fluent-bit/flb_sds.h>
-
- #include "tail.h"
- #include "tail_file.h"
-@@ -90,6 +94,60 @@ static inline void debug_event_mask(struct flb_tail_config *ctx,
-     }
+ 
+ #include <stdio.h>
+ #include <stdlib.h>
+@@ -94,6 +98,65 @@ static int debug_event_mask(struct flb_tail_config *ctx,
+     return 0;
  }
-
+ 
++
 +/*
 + * Emit a sentinel record on a derived tag (original_tag._close) to signal
 + * downstream S3 outputs to flush buffered data for this file's tag.
@@ -74,13 +75,22 @@ diff --git a/plugins/in_tail/tail_fs_inotify.c b/plugins/in_tail/tail_fs_inotify
 +    return 0;
 +}
 +
- static int tail_fs_event(struct flb_input_instance *ins,
-                          struct flb_config *config, void *in_context)
+ static int tail_fs_add(struct flb_tail_file *file, int check_rotated)
  {
-@@ -142,6 +200,15 @@ static int tail_fs_event(struct flb_input_instance *ins,
+     int flags;
+@@ -107,7 +170,7 @@ static int tail_fs_add(struct flb_tail_file *file, int check_rotated)
+      * lines from the file and once we reach EOF (and a watch_fd exists),
+      * we update the flags to receive notifications.
+      */
+-    flags = IN_ATTRIB | IN_IGNORED | IN_MODIFY | IN_Q_OVERFLOW;
++    flags = IN_ATTRIB | IN_IGNORED | IN_MODIFY | IN_Q_OVERFLOW | IN_CLOSE_WRITE;
+ 
+     if (check_rotated == FLB_TRUE) {
+         flags |= IN_MOVE_SELF;
+@@ -250,6 +313,15 @@ static int tail_fs_event(struct flb_input_instance *ins,
          }
      }
-
+ 
 +    /* IN_CLOSE_WRITE: container runtime closed the log file.
 +     * Read any remaining data first, then emit a close signal. */
 +    if (ev.mask & IN_CLOSE_WRITE) {
@@ -90,25 +100,16 @@ diff --git a/plugins/in_tail/tail_fs_inotify.c b/plugins/in_tail/tail_fs_inotify
 +        return 0;
 +    }
 +
-     /* IN_MODIFY: handle truncation (size_delta < 0 => seek to 0) */
      if (ev.mask & IN_MODIFY) {
-         if (size_delta < 0) {
-@@ -161,7 +228,7 @@ static int tail_fs_add(struct flb_tail_file *file, int check_rotated)
-     char *name;
-     struct flb_tail_config *ctx = file->config;
-
--    flags = IN_ATTRIB | IN_IGNORED | IN_MODIFY | IN_Q_OVERFLOW;
-+    flags = IN_ATTRIB | IN_IGNORED | IN_MODIFY | IN_Q_OVERFLOW | IN_CLOSE_WRITE;
-
-     if (check_rotated == FLB_TRUE) {
-         flags |= IN_MOVE_SELF;
+         /*
+          * The file was modified, check how many new bytes do
 diff --git a/plugins/out_s3/s3.c b/plugins/out_s3/s3.c
 --- a/plugins/out_s3/s3.c
 +++ b/plugins/out_s3/s3.c
-@@ -3766,6 +3766,46 @@ static void cb_s3_flush(struct flb_event_chunk *event_chunk,
-
+@@ -3765,6 +3765,52 @@ static void cb_s3_flush(struct flb_event_chunk *event_chunk,
+     /* Cleanup old buffers and initialize upload timer */
      flush_init(ctx);
-
+ 
 +    /* Detect close-write signal: tag ends with "._close".
 +     * Force-flush buffered data for the base tag and discard this sentinel. */
 +    {
@@ -154,4 +155,7 @@ diff --git a/plugins/out_s3/s3.c b/plugins/out_s3/s3.c
 +        }
 +    }
 +
++
+     /* Process chunk */
      if (ctx->log_key) {
+         chunk = flb_pack_msgpack_extract_log_key(ctx,
