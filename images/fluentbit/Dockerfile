@@ -1,4 +1,4 @@
-FROM debian:trixie@sha256:2c91e484d93f0830a7e05a2b9d92a7b102be7cab562198b984a84fdbc7806d91 AS build
+FROM debian:trixie@sha256:3615a749858a1cba49b408fb49c37093db813321355a9ab7c1f9f4836341e9db AS build
 
 ARG FLB_VERSION=v4.2.2
 ARG FLB_TRACE=Off
@@ -23,6 +23,7 @@ RUN set -ex; \
     wget \
     lsb-release \
     gnupg \
+    libsasl2-dev \
   '; \
   apt-get update; \
   apt-get install -y --no-install-recommends $buildDeps; \
@@ -60,11 +61,11 @@ RUN cmake \
     -DFLB_EXAMPLES=Off \
     -DFLB_HTTP_SERVER=On \
     -DFLB_IN_SYSTEMD=Off \
-    -DFLB_KAFKA=Off \
+    -DFLB_KAFKA=On \
     -DFLB_OUT_PGSQL=Off \
     -DFLB_ARROW=On \
     -DFLB_WASM=Off \
-    -DFLB_LUAJIT=Off \
+    -DFLB_LUAJIT=On \
     ..
 
 RUN make -j$(nproc)
